@@ -16,8 +16,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "RabbitHole AI",
-  description: "Turn any research question into an interactive knowledge board.",
+  title: { default: "Obscura", template: "%s · Obscura" },
+  description: "Obscura turns any research question into an interactive knowledge board.",
+  applicationName: "Obscura",
 };
 
 export const viewport: Viewport = {

@@ -1,0 +1,14 @@
+import type { MetadataRoute } from "next";
+
+export default function manifest(): MetadataRoute.Manifest {
+  return {
+    name: "Obscura",
+    short_name: "Obscura",
+    description: "Turn any research question into an interactive knowledge board.",
+    start_url: "/",
+    display: "standalone",
+    background_color: "#0b0a10",
+    theme_color: "#0b0a10",
+    icons: [{ src: "/icon.svg", sizes: "any", type: "image/svg+xml" }],
+  };
+}

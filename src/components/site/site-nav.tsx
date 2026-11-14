@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, House, LayoutGrid, Rabbit } from "lucide-react";
+import { BarChart3, House, LayoutGrid, Aperture } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -25,9 +25,9 @@ export function SiteNav() {
       <nav className="mx-auto flex h-12 max-w-6xl items-center gap-2 px-4 sm:gap-6 md:h-14">
         <Link href="/" className="flex shrink-0 items-center gap-2 font-semibold tracking-tight">
           <span className="flex size-7 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 shadow-[0_0_24px_-4px_rgb(167_139_250/0.6)]">
-            <Rabbit className="size-4 text-white" />
+            <Aperture className="size-4 text-white" />
           </span>
-          <span>RabbitHole AI</span>
+          <span>Obscura</span>
         </Link>
         {/* Phones use the bottom bar instead. */}
         <div className="ml-auto hidden items-center gap-1 md:flex">
@@ -91,7 +91,7 @@ export function SiteShell({ children }: { children: React.ReactNode }) {
       <SiteNav />
       <main className="flex-1">{children}</main>
       <footer className="border-t border-white/[0.06] py-6 text-center text-xs text-muted-foreground">
-        RabbitHole AI · research beyond the answer
+        Obscura · research beyond the answer
       </footer>
       {/* Room for the bottom tab bar on phones. */}
       <div className="h-[calc(3.5rem+env(safe-area-inset-bottom))] md:hidden" aria-hidden />
