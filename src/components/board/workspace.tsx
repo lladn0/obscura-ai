@@ -151,6 +151,8 @@ function WorkspaceInner() {
         id: `fq-${crypto.randomUUID().slice(0, 8)}`,
         kind: "question",
         label: question.trim(),
+        // What the follow-up is asked about (a question, or a claim's statement).
+        description: parent.data.description ? `${parent.data.label} — ${parent.data.description}` : undefined,
         path: [...ancestors(hierarchy, parentId).reverse().map(label), parent.data.label],
         children: [],
         parentId,

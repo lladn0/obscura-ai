@@ -38,6 +38,10 @@ type BaseNodeData = {
   generating?: boolean;
   researchId?: string;
   branchId?: string;
+  /** 0..1: how central this node is to its question (drives edge thickness). */
+  importance?: number;
+  /** Notes only: shown as a compact header. */
+  minimized?: boolean;
   /** The user edited label/description: later AI updates must not overwrite them. */
   userEdited?: boolean;
   /** Optional contextual image (chosen by the AI, retrieved from Wikimedia Commons). */
@@ -118,6 +122,8 @@ export type ResearchEdgeData = {
   strength?: Confidence;
   /** Drawn by the user: a visual link only, never part of the research hierarchy. */
   manual?: boolean;
+  /** Stroke width chosen by the user for a manual link. */
+  width?: number;
 };
 
 /** All research edges render through the single custom "relation" edge. */

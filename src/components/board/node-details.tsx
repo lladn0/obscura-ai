@@ -112,10 +112,12 @@ function KindFields({ node }: { node: ResearchNode }) {
 
 /** Follow-up questions and extra context for a research question. */
 function QuestionTools({
+  forClaim,
   context,
   onFollowUp,
   onSetContext,
 }: {
+  forClaim?: boolean;
   context: string;
   onFollowUp: (question: string) => void;
   onSetContext: (context: string) => void;
@@ -136,8 +138,9 @@ function QuestionTools({
     <div className="space-y-2">
       <div className="flex flex-wrap gap-1.5">
         <Button variant={mode === "followUp" ? "secondary" : "outline"} size="xs" onClick={() => open("followUp")}>
-          <MessageSquarePlus /> Ask Follow-Up
+          <MessageSquarePlus /> {forClaim ? "Ask About This" : "Ask Follow-Up"}
         </Button>
+        {!forClaim && (
         <Button
           variant={mode === "context" ? "secondary" : "outline"}
           size="xs"
@@ -146,6 +149,7 @@ function QuestionTools({
         >
           <SlidersHorizontal /> {context ? "Edit context" : "Add context"}
         </Button>
+        )}
       </div>
       {context && mode !== "context" && (
         <p className="rounded-md border border-white/[0.06] bg-white/[0.02] px-2 py-1.5 text-xs text-muted-foreground">
@@ -167,7 +171,9 @@ function QuestionTools({
             rows={2}
             placeholder={
               mode === "followUp"
-                ? "e.g. How did European banks contribute?"
+                ? forClaim
+                  ? "e.g. Why did investors trust these ratings?"
+                  : "e.g. How did European banks contribute?"
                 : "e.g. Focus on the Lithuanian hackathon event, not the word “unfair”."
             }
             className="w-full resize-none rounded-md border border-white/15 bg-background/60 px-2 py-1.5 text-xs leading-relaxed outline-none focus:border-white/30"
@@ -339,9 +345,10 @@ export function NodeDetails({
 
         <InvestigateActions node={node} active={investigate.active} note={investigate.note} onRun={investigate.onRun} />
 
-        {node.type === "question" && (
+        {(node.type === "question" || node.type === "claim") && (
           <QuestionTools
-            context={node.data.context ?? ""}
+            forClaim={node.type === "claim"}
+            context={node.type === "question" ? (node.data.context ?? "") : ""}
             onFollowUp={investigate.onFollowUp}
             onSetContext={investigate.onSetContext}
           />

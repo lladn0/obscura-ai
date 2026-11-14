@@ -11,6 +11,13 @@ const PAGES_PER_SEARCH = 4;
 /** Firecrawl bills search per 10 results, plus each scraped page. Used when a page doesn't report credits. */
 const SEARCH_BASE_CREDITS = 2;
 const SNIPPETS_PER_SOURCE = 3;
+/**
+ * Firecrawl bills PDFs per page: one scraped 600-page report costs ~600
+ * credits. Only the first pages are parsed (snippets come from them anyway).
+ */
+const PDF_MAX_PAGES = 4;
+/** Per-run safety budget: past it, searches return result descriptions without scraping pages. */
+const RUN_CREDIT_BUDGET = 120;
 const MAX_SNIPPET_CHARS = 420;
 
 let client: Firecrawl | null = null;
@@ -50,17 +57,30 @@ export function relevantSnippets(markdown: string, query: string): string {
  */
 export function createSearch() {
   const cache = new Map<string, Promise<SearchResult>>();
+  let spent = 0;
 
   return (query: string, focus: string): Promise<SearchResult> => {
     const key = query.trim().toLowerCase().replace(/\s+/g, " ");
     const hit = cache.get(key);
     if (hit) return hit.then((r) => ({ ...r, credits: 0, cached: true }));
 
+    const scrape = spent < RUN_CREDIT_BUDGET;
+    if (!scrape) console.warn(`[firecrawl] run budget of ${RUN_CREDIT_BUDGET} credits reached; searching without scraping`);
     const request = firecrawl()
-      .search(query, { limit: PAGES_PER_SEARCH, scrapeOptions: { formats: ["markdown"], onlyMainContent: true } })
+      .search(query, {
+        limit: PAGES_PER_SEARCH,
+        ...(scrape && {
+          scrapeOptions: {
+            formats: ["markdown"],
+            onlyMainContent: true,
+            parsers: [{ type: "pdf", mode: "fast", maxPages: PDF_MAX_PAGES }],
+          },
+        }),
+      })
       .then((data): SearchResult => {
         const sources: WebSource[] = [];
         let credits = SEARCH_BASE_CREDITS;
+        const perPage: string[] = [];
         for (const item of data.web ?? []) {
           const doc = item as {
             url?: string;
@@ -69,8 +89,12 @@ export function createSearch() {
             markdown?: string;
             metadata?: { url?: string; sourceURL?: string; title?: string; creditsUsed?: number };
           };
-          if (doc.markdown !== undefined) credits += doc.metadata?.creditsUsed ?? 1;
           const url = doc.url ?? doc.metadata?.url ?? doc.metadata?.sourceURL;
+          if (doc.markdown !== undefined) {
+            const used = doc.metadata?.creditsUsed ?? 1;
+            credits += used;
+            perPage.push(`${used}cr ${url ?? "?"}`);
+          }
           if (!url || !/^https?:\/\//.test(url) || sources.some((s) => s.url === url)) continue;
           const content = doc.markdown ?? doc.description ?? "";
           const snippets = relevantSnippets(content, `${query} ${focus}`) || (doc.description ?? "").slice(0, MAX_SNIPPET_CHARS);
@@ -83,6 +107,9 @@ export function createSearch() {
             snippets,
           });
         }
+        spent += credits;
+        // Firecrawl usage is logged on its own, separately from Anthropic cost (llm.ts).
+        console.info(`[firecrawl] "${query.slice(0, 60)}" ${credits} credits (run total ${spent})${perPage.length ? `\n  ${perPage.join("\n  ")}` : ""}`);
         return { sources, credits, cached: false };
       });
     cache.set(key, request);

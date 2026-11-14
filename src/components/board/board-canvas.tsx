@@ -109,7 +109,7 @@ function EdgeEditor({ edge, board }: { edge: ResearchEdge; board: Board }) {
   const [custom, setCustom] = useState(!!data.label);
   const [label, setLabel] = useState(data.label ?? "");
   const set = (relation: EdgeRelation, text?: string) =>
-    board.commit({ type: "editEdge", edgeId: edge.id, relation, label: text });
+    board.commit({ type: "editEdge", edgeId: edge.id, relation, label: text, width: data.width });
   const options: EdgeRelation[] = [...MANUAL_RELATIONS];
   if (!options.includes(data.relation)) options.push(data.relation);
   return (
@@ -159,6 +159,26 @@ function EdgeEditor({ edge, board }: { edge: ResearchEdge; board: Board }) {
             className="h-6 w-36 rounded-md border border-white/15 bg-background/60 px-1.5 text-xs outline-none focus:border-white/30"
           />
         )}
+        {data.manual && (
+          <>
+            <div className="mx-0.5 h-4 w-px bg-white/10" />
+            {EDGE_WIDTHS.map(({ label: name, width }) => (
+              <button
+                key={name}
+                type="button"
+                title={`${name} line`}
+                aria-label={`${name} line`}
+                onClick={() => board.commit({ type: "editEdge", edgeId: edge.id, relation: data.relation, label: data.label, width })}
+                className={cn(
+                  "flex h-6 w-6 items-center justify-center rounded-md hover:bg-white/10",
+                  (data.width ?? 2.2) === width && "bg-white/10",
+                )}
+              >
+                <span className="w-3.5 rounded-full bg-foreground/70" style={{ height: width }} />
+              </button>
+            ))}
+          </>
+        )}
         <div className="mx-0.5 h-4 w-px bg-white/10" />
         <Button
           variant="ghost"
@@ -174,6 +194,12 @@ function EdgeEditor({ edge, board }: { edge: ResearchEdge; board: Board }) {
     </Panel>
   );
 }
+
+const EDGE_WIDTHS = [
+  { label: "Thin", width: 1.5 },
+  { label: "Normal", width: 2.2 },
+  { label: "Thick", width: 3.5 },
+];
 
 type MenuState = { x: number; y: number; flow: XYPosition; nodeId?: string };
 
@@ -307,15 +333,34 @@ export function BoardCanvas({
     return ids;
   }, [selectedId, hierarchy, edges]);
 
+  /**
+   * Notes linked (by manual arrows) to research nodes fold with those branches:
+   * visible while at least one linked node is visible and unfolded. Standalone
+   * notes are never hidden.
+   */
+  const hiddenNotes = useMemo(() => {
+    const kinds = new Map(nodes.map((n) => [n.id, n.type]));
+    const links = new Map<string, string[]>();
+    for (const e of edges) {
+      if (!e.data?.manual) continue;
+      for (const [a, b] of [[e.source, e.target], [e.target, e.source]])
+        if (kinds.get(a) === "note" && kinds.get(b) !== "note" && kinds.has(b))
+          links.set(a, [...(links.get(a) ?? []), b]);
+    }
+    const hidden = new Set<string>();
+    for (const [note, attached] of links)
+      if (!attached.some((id) => visible.has(id) && !collapsed.has(id))) hidden.add(note);
+    return hidden;
+  }, [nodes, edges, visible, collapsed]);
+
   const displayNodes = useMemo(
     () =>
       nodes.map((n): ResearchNode => {
-        // Notes float freely: folding never hides them.
-        const hidden = n.type !== "note" && !visible.has(n.id);
+        const hidden = n.type === "note" ? hiddenNotes.has(n.id) : !visible.has(n.id);
         const dim = !!branch && !branch.has(n.id);
         return hidden || dim || n.hidden ? { ...n, hidden, className: dim ? "rh-dim" : undefined } : n;
       }),
-    [nodes, visible, branch],
+    [nodes, visible, branch, hiddenNotes],
   );
 
   const displayEdges = useMemo(
@@ -344,6 +389,7 @@ export function BoardCanvas({
       editingId: board.editingId,
       setEditing: board.setEditing,
       saveEdit: (id, edit) => board.commit({ type: "editNode", nodeId: id, edit }),
+      minimizeNote: (id, minimized) => dispatch({ type: "minimizeNotes", nodeIds: [id], minimized }),
     }),
     [mode, hierarchy, collapsed, dispatch, busy, board.editingId, board.setEditing, board.commit],
   );

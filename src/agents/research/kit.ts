@@ -56,8 +56,9 @@ understand THIS item: a concrete thing that can be seen (an object, organism, bo
 artwork, artifact, device or component, mechanism, celestial object, a verified event venue) or a standard diagram
 that explains it. Most items do not need one: abstract ideas, definitions, arguments, numbers, opinions, schedules
 and plain factual claims get none. Never add an image just because of the topic's field, and never a decorative one.
-When useful, write a specific search query naming exactly what the image must show
-(e.g. "human temporal bone lateral view anatomical diagram"); never a generic topic query, never the same query twice.`;
+When useful, write a short Wikimedia Commons search query of 2 to 5 words that names the exact subject first,
+as a file about it would be titled (e.g. "temporal bone lateral", "Lehman Brothers headquarters", "Vilnius TV Tower",
+"Saturn V rocket"); never a generic topic query, never the same query twice. Otherwise write: none.`;
 
 /** IMAGE field: a specific image search query, or nothing. */
 export const imageQuery = z
@@ -67,6 +68,19 @@ export const imageQuery = z
     const q = s?.replace(/^["“]|["”]$/g, "").replace(/\s+/g, " ").trim();
     return !q || /^(none|n\/a|no)\b/i.test(q) ? undefined : q.slice(0, 120);
   });
+
+/** IMPORTANCE field: how central an item is to the question (not how certain it is). */
+export const importance = (high: number, medium: number, low: number) =>
+  z
+    .string()
+    .optional()
+    .transform((s) => {
+      const v = (s ?? "").trim().toLowerCase();
+      return v.startsWith("high") ? high : v.startsWith("low") ? low : medium;
+    });
+
+export const IMPORTANCE_RULE = `IMPORTANCE rates how central the item is to answering the research question
+(high: essential, medium: useful, low: minor detail). It is not confidence or verification.`;
 
 /** Node data asking the client to fetch an image (retrieval never blocks text). */
 export const imageData = (query: string | undefined) =>
@@ -87,6 +101,7 @@ const FindingSchema = z.object({
     .optional()
     .transform((s) => (s ?? "").toUpperCase().match(/F\d+/g)?.map((f) => Number(f.slice(1)) - 1) ?? []),
   IMAGE: imageQuery,
+  IMPORTANCE: importance(0.65, 0.4, 0.2),
 });
 
 // --- Emitting graph operations --------------------------------------------------
@@ -217,6 +232,7 @@ evidence for this finding and adds something beyond the title. Copy it exactly. 
 restatement of the finding; leave it empty otherwise (most findings need none).
 CONTRADICTS optionally lists earlier findings in this answer that this one conflicts with (F1, F2, ...).
 If no sources were found, mark every finding unverified and use SOURCES: none.
+${IMPORTANCE_RULE}
 ${IMAGE_RULE}
 
 Output ONLY records in exactly this format, no other text, no markdown:
@@ -228,7 +244,8 @@ STATUS: verified | unverified | contested
 SOURCES: <comma-separated source ids, or none>
 QUOTE: <verbatim excerpt, or leave empty>
 CONTRADICTS: <finding ids, or leave empty>
-IMAGE: <specific image search query, or none>
+IMPORTANCE: high | medium | low
+IMAGE: <short image search query, or none>
 
 Each field value stays on one line.`;
 
@@ -289,6 +306,7 @@ export async function streamFindings({
         verification,
         contested: verification === "contested",
         sourceIds: sourceNodeIds,
+        importance: f.IMPORTANCE,
         ...imageData(f.IMAGE),
       });
 

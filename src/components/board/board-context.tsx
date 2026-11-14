@@ -17,6 +17,7 @@ export type BoardView = {
   editingId: string | null;
   setEditing: (id: string | null) => void;
   saveEdit: (id: string, edit: NodeEdit) => void;
+  minimizeNote: (id: string, minimized: boolean) => void;
 };
 
 export const BoardViewContext = createContext<BoardView | null>(null);

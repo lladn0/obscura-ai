@@ -11,6 +11,8 @@ import {
   IMAGE_RULE,
   imageData,
   imageQuery,
+  importance,
+  IMPORTANCE_RULE,
   oneLine,
   research,
   streamFindings,
@@ -61,7 +63,7 @@ type State = typeof ResearchState.State;
 
 
 const MAX_DIRECTIONS = 6;
-const DirectionSchema = z.object({ TITLE: oneLine(120), SUMMARY: oneLine(400), QUERY: oneLine(200), IMAGE: imageQuery });
+const DirectionSchema = z.object({ TITLE: oneLine(120), SUMMARY: oneLine(400), QUERY: oneLine(200), IMAGE: imageQuery, IMPORTANCE: importance(1, 0.75, 0.5) });
 
 const SynthesisSchema = z.object({
   TITLE: oneLine(160),
@@ -87,6 +89,7 @@ Step 2, plan. Choose the research directions needed to answer the question about
   speculation, and no controversy, public reaction or history angles unless the question or the sources call for them.
 - Directions must not overlap.
 - QUERY is a focused web search query that names the identified subject explicitly.
+${IMPORTANCE_RULE}
 ${IMAGE_RULE}
 
 If the sources do not establish what the subject is and the question could reasonably mean different things,
@@ -101,7 +104,8 @@ DIRECTION
 TITLE: <direction title, at most 6 words>
 SUMMARY: <one sentence, at most 20 words, on what this direction investigates>
 QUERY: <a focused web search query for this direction>
-IMAGE: <specific image search query, or none>
+IMPORTANCE: high | medium | low
+IMAGE: <short image search query, or none>
 
 (or, only when the subject cannot be identified)
 
@@ -166,7 +170,8 @@ async function planResearch(config: LangGraphRunnableConfig, input: PlanInput) {
       const n = dirNo.size + 1;
       dirNo.set(r.index, n);
       const e = em(n);
-      e.created(`${branchOf(n)}:direction`, "claim");
+      // Folded from the start: only the question and its main branches show while research continues below.
+      e.created(`${branchOf(n)}:direction`, "claim", {}, true);
       e.edge(`${branchOf(n)}:direction`, "explains", rootId);
     },
     onFieldDelta: (r, field, delta) => {
@@ -192,7 +197,7 @@ async function planResearch(config: LangGraphRunnableConfig, input: PlanInput) {
         return;
       }
       const d = parsed.data;
-      e.completed(nodeId, { label: d.TITLE, description: d.SUMMARY, ...imageData(d.IMAGE) });
+      e.completed(nodeId, { label: d.TITLE, description: d.SUMMARY, importance: d.IMPORTANCE, ...imageData(d.IMAGE) });
       e.branch(d.TITLE, "queued");
       branches.push({
         branchId: branchOf(n),
@@ -301,7 +306,11 @@ async function followUp(state: State, config: LangGraphRunnableConfig) {
   e.text(t.id, "label", t.label);
   e.completed(t.id);
 
-  const context = [t.path.length ? `It is a follow-up within: ${t.path.join(" > ")}` : "", guidanceOf(t).trim()]
+  const context = [
+    t.path.length ? `It is a follow-up within: ${t.path.join(" > ")}` : "",
+    t.description ? `About: ${t.description}` : "",
+    guidanceOf(t).trim(),
+  ]
     .filter(Boolean)
     .join("\n");
   const { branches } = await planResearch(config, {

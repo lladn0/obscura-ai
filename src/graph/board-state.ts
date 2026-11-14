@@ -47,7 +47,8 @@ export type BoardAction =
   | { type: "deleteNodes"; nodeIds: string[] }
   | { type: "deleteEdges"; edgeIds: string[] }
   | { type: "connect"; edgeId: string; source: string; target: string }
-  | { type: "editEdge"; edgeId: string; relation: EdgeRelation; label?: string }
+  | { type: "editEdge"; edgeId: string; relation: EdgeRelation; label?: string; width?: number }
+  | { type: "minimizeNotes"; nodeIds: string[] | "all"; minimized: boolean }
   | { type: "replace"; state: BoardState };
 
 /** Agent graph operations, applied in arrival order as one batch per frame. */
@@ -332,10 +333,16 @@ export function boardReducer(state: BoardState, action: BoardAction): BoardState
         selected: true,
         data: { relation: "related_to", manual: true },
       };
+      // A note linked to a folded branch folds with it: open the branch so it doesn't vanish now.
+      const kinds = new Map(state.nodes.map((n) => [n.id, n.type]));
+      const hasNote = kinds.get(action.source) === "note" || kinds.get(action.target) === "note";
       return {
         ...state,
         nodes: state.nodes.map((n) => (n.selected ? { ...n, selected: false } : n)),
         edges: [...state.edges.map((e) => (e.selected ? { ...e, selected: false } : e)), edge],
+        collapsed: hasNote
+          ? state.collapsed.filter((id) => id !== action.source && id !== action.target)
+          : state.collapsed,
       };
     }
     case "editEdge":
@@ -343,8 +350,25 @@ export function boardReducer(state: BoardState, action: BoardAction): BoardState
         ...state,
         edges: state.edges.map((e) =>
           e.id === action.edgeId
-            ? { ...e, data: { ...e.data!, relation: action.relation, label: action.label || undefined } }
+            ? {
+                ...e,
+                data: {
+                  ...e.data!,
+                  relation: action.relation,
+                  label: action.label || undefined,
+                  width: action.width ?? e.data?.width,
+                },
+              }
             : e,
+        ),
+      };
+    case "minimizeNotes":
+      return {
+        ...state,
+        nodes: state.nodes.map((n) =>
+          n.type === "note" && (action.nodeIds === "all" || action.nodeIds.includes(n.id))
+            ? { ...n, data: { ...n.data, minimized: action.minimized || undefined } }
+            : n,
         ),
       };
   }

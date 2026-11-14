@@ -275,11 +275,15 @@ export function useBoard() {
     [relayout],
   );
 
-  const expandAll = useCallback(() => dispatch({ type: "setCollapsed", nodeIds: [] }), []);
-  const collapseToBranches = useCallback(
-    () => dispatch({ type: "setCollapsed", nodeIds: defaultCollapsed(hierarchy) }),
-    [hierarchy],
-  );
+  const expandAll = useCallback(() => {
+    dispatch({ type: "setCollapsed", nodeIds: [] });
+    dispatch({ type: "minimizeNotes", nodeIds: "all", minimized: false });
+  }, []);
+  /** Every tree folds to its question + main branches; notes shrink to their header. */
+  const collapseToBranches = useCallback(() => {
+    dispatch({ type: "setCollapsed", nodeIds: defaultCollapsed(hierarchy) });
+    dispatch({ type: "minimizeNotes", nodeIds: "all", minimized: true });
+  }, [hierarchy]);
 
   // --- Editing with undo -----------------------------------------------------
 

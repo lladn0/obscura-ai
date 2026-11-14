@@ -133,6 +133,18 @@ function treeParams(source: InternalNode, target: InternalNode) {
   };
 }
 
+/**
+ * How central a tree edge's child is to its question (0..1). The agent's own
+ * rating wins; otherwise main branches matter most, supporting material least.
+ * Independent of confidence and verification.
+ */
+function importanceOf(node: InternalNode, depth: number | undefined) {
+  if (node.type === "evidence" || node.type === "source") return 0.1;
+  const rated = (node.data as { importance?: number }).importance;
+  if (typeof rated === "number") return Math.max(0, Math.min(1, rated));
+  return depth === 1 ? 0.75 : depth === 2 ? 0.4 : 0.2;
+}
+
 export const RelationEdge = memo(function RelationEdge({
   id,
   source,
@@ -162,6 +174,13 @@ export const RelationEdge = memo(function RelationEdge({
   const dim = data.emphasis === "dim";
   const manual = !!data.manual;
   const resting = manual ? 0.7 : isTreeEdge ? 0.55 : 0.28;
+  // Edge thickness follows importance: 1.5px (minor detail) to 4.5px (key branch).
+  const child = parentIsSource ? targetNode : sourceNode;
+  const width = manual
+    ? (data.width ?? 2.2)
+    : isTreeEdge
+      ? 1.5 + 3 * importanceOf(child, hierarchy.depth.get(child.id))
+      : style.width;
 
   return (
     <>
@@ -174,7 +193,7 @@ export const RelationEdge = memo(function RelationEdge({
         interactionWidth={16}
         style={{
           stroke: style.color,
-          strokeWidth: focus ? style.width + 0.8 : style.width,
+          strokeWidth: focus ? width + 0.8 : width,
           strokeDasharray: manual && data.relation === "related_to" ? undefined : style.dash,
           strokeLinecap: "round",
           opacity: dim ? 0.1 : focus ? 1 : resting,

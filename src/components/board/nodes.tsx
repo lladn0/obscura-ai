@@ -200,6 +200,8 @@ function Shell({
   image,
   edited,
   alwaysOpen,
+  minimized,
+  onToggleMinimized,
 }: {
   id: string;
   generating?: boolean;
@@ -207,6 +209,9 @@ function Shell({
   edited?: boolean;
   /** Show the description without the expand toggle (notes). */
   alwaysOpen?: boolean;
+  /** Notes: compact header only. */
+  minimized?: boolean;
+  onToggleMinimized?: () => void;
   kind: NodeKind;
   selected?: boolean;
   label: string;
@@ -262,6 +267,20 @@ function Shell({
               <span className="relative inline-flex size-2 rounded-full bg-sky-400" />
             </span>
           )}
+          {onToggleMinimized && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleMinimized();
+              }}
+              aria-label={minimized ? "Expand note" : "Collapse note"}
+              title={minimized ? "Expand note" : "Collapse note"}
+              className="nodrag -mr-1 flex size-5 items-center justify-center rounded-md text-muted-foreground/70 hover:bg-white/5 hover:text-foreground"
+            >
+              <ChevronDown className={cn("size-3.5 transition-transform", !minimized && "rotate-180")} />
+            </button>
+          )}
           {description && !generating && !alwaysOpen && (
             <button
               type="button"
@@ -285,7 +304,7 @@ function Shell({
         <p
           className={cn(
             "text-[13px] leading-snug font-medium break-words text-foreground",
-            !open && !generating && "line-clamp-3",
+            minimized ? "line-clamp-1" : !open && !generating && "line-clamp-3",
             labelClassName,
           )}
         >
@@ -298,13 +317,13 @@ function Shell({
           <div className="h-2.5 w-1/2 animate-pulse rounded bg-white/10" />
         </div>
       )}
-      {!editing && (open || generating) && description && (
+      {!editing && !minimized && (open || generating) && description && (
         <p className="mt-1.5 text-xs leading-relaxed break-words text-muted-foreground">
           {description}
           {generating && <span className="rh-caret" />}
         </p>
       )}
-      {image && <NodeImage image={image} />}
+      {image && !minimized && <NodeImage image={image} />}
       {footer && <div className="mt-2">{footer}</div>}
       <BranchToggle id={id} selected={selected} />
     </div>
@@ -470,6 +489,8 @@ const InsightNodeView = memo(function InsightNodeView({ id, data, selected }: No
 });
 
 const NoteNodeView = memo(function NoteNodeView({ id, data, selected }: NodeProps<NoteNode>) {
+  const { minimizeNote, editingId } = useBoardView();
+  const minimized = !!data.minimized && editingId !== id;
   return (
     <Shell
       id={id}
@@ -478,6 +499,8 @@ const NoteNodeView = memo(function NoteNodeView({ id, data, selected }: NodeProp
       label={data.label}
       description={data.description}
       alwaysOpen
+      minimized={minimized}
+      onToggleMinimized={() => minimizeNote(id, !minimized)}
       image={data}
       className="bg-gradient-to-br from-yellow-300/[0.07] via-card/95 to-card/95"
     />
