@@ -78,8 +78,10 @@ export type ActionTarget = {
   branch?: { label: string; kind: NodeKind; verification?: Verification }[];
   /** User guidance attached to this node and its ancestors ("focus on the Lithuanian event"). */
   context?: string[];
-  /** Follow-up questions: the existing question the new one is asked under. */
+  /** Follow-up questions: the existing node (question or claim) the new one is asked under. */
   parentId?: string;
+  /** The research question that owns the target (questions created by the action nest under it). */
+  questionId?: string;
 };
 
 export type ActionRequest = {

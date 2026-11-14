@@ -228,7 +228,7 @@ async function planResearch(config: LangGraphRunnableConfig, input: PlanInput) {
   // Ambiguous subject: ask instead of inventing a narrative.
   if (!branches.length && clarify) {
     const id = `${idBase}:clarify`;
-    root.created(id, "question", { status: "open", gap: "unanswered" });
+    root.created(id, "question", { status: "open", gap: "unanswered", parentQuestionId: rootId });
     root.edge(id, "related_to", rootId);
     root.text(id, "label", clarify);
     root.completed(id, {
@@ -301,7 +301,7 @@ async function followUp(state: State, config: LangGraphRunnableConfig) {
   const a = state.action!;
   const t = a.target;
   const e = emitter(config, state.researchId, a.actionId);
-  e.created(t.id, "question", { status: "exploring" });
+  e.created(t.id, "question", { status: "exploring", parentQuestionId: t.questionId ?? t.parentId });
   if (t.parentId) e.edge(t.id, "explains", t.parentId);
   e.text(t.id, "label", t.label);
   e.completed(t.id);

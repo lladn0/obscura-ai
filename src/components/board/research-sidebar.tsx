@@ -4,7 +4,7 @@ import { useState, type ReactNode, type RefObject } from "react";
 import { ArrowUp, ChevronRight } from "lucide-react";
 
 import type { ActivityEntry } from "@/graph/board-state";
-import { EDGE_RELATIONS, NODE_KINDS, type ResearchNode } from "@/graph/types";
+import { EDGE_RELATIONS, NODE_KINDS, type QuestionNode, type ResearchNode } from "@/graph/types";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
@@ -13,7 +13,6 @@ import { usePersistentState } from "./use-persistent-state";
 
 const time = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" });
 const ACTIVITY_PREVIEW = 5;
-const QUESTIONS_PREVIEW = 6;
 
 function Section({
   id,
@@ -120,8 +119,139 @@ function Activity({ activity }: { activity: ActivityEntry[] }) {
   );
 }
 
+type QItem = { node: QuestionNode; children: QItem[] };
+
+/** Question forest from stable parent references; cycles or missing parents fall back to roots. */
+function questionForest(questions: QuestionNode[], parents: ReadonlyMap<string, string | undefined>): QItem[] {
+  const kids = new Map<string, QuestionNode[]>();
+  const roots: QuestionNode[] = [];
+  for (const q of questions) {
+    const p = parents.get(q.id);
+    if (p) kids.set(p, [...(kids.get(p) ?? []), q]);
+    else roots.push(q);
+  }
+  const seen = new Set<string>();
+  const build = (q: QuestionNode): QItem => {
+    seen.add(q.id);
+    return { node: q, children: (kids.get(q.id) ?? []).filter((c) => !seen.has(c.id)).map(build) };
+  };
+  const forest = roots.map(build);
+  // Anything unreachable (a parent cycle) is still listed.
+  for (const q of questions) if (!seen.has(q.id)) forest.push(build(q));
+  return forest;
+}
+
+/** VS Code-style explorer row: chevron folds the nested questions only (never the canvas). */
+function QuestionRow({
+  item,
+  depth,
+  selectedId,
+  folded,
+  onToggle,
+  onSelect,
+}: {
+  item: QItem;
+  depth: number;
+  selectedId: string | null;
+  folded: ReadonlySet<string>;
+  onToggle: (id: string) => void;
+  onSelect: (id: string) => void;
+}) {
+  const { node, children } = item;
+  const open = !folded.has(node.id);
+  const selected = node.id === selectedId;
+  return (
+    <li>
+      <div
+        className={cn(
+          "group flex min-w-0 items-center rounded-md transition-colors hover:bg-white/[0.04]",
+          selected && "bg-violet-400/[0.12] text-foreground hover:bg-violet-400/[0.15]",
+        )}
+      >
+        {children.length ? (
+          <button
+            type="button"
+            onClick={() => onToggle(node.id)}
+            aria-label={open ? "Collapse questions" : "Expand questions"}
+            aria-expanded={open}
+            className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground md:size-5"
+          >
+            <ChevronRight className={cn("size-3.5 transition-transform duration-150", open && "rotate-90")} />
+          </button>
+        ) : (
+          <span className="flex size-6 shrink-0 items-center justify-center md:size-5" aria-hidden>
+            <span className={cn("size-1.5 rounded-full", node.data.gap ? "border border-violet-300/70" : "bg-violet-400/80")} />
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={() => onSelect(node.id)}
+          title={node.data.label}
+          aria-current={selected ? "true" : undefined}
+          className={cn(
+            "min-w-0 flex-1 truncate py-1.5 pr-2 text-left text-xs leading-snug md:py-1",
+            depth === 0 ? "font-medium text-foreground/90" : "text-foreground/80",
+            selected && "text-foreground",
+          )}
+        >
+          {node.data.label || "Untitled question"}
+        </button>
+      </div>
+      {children.length > 0 && open && (
+        <ul className="ml-[11px] border-l border-white/[0.08] pl-1 md:ml-[9px]">
+          {children.map((c) => (
+            <QuestionRow
+              key={c.node.id}
+              item={c}
+              depth={depth + 1}
+              selectedId={selectedId}
+              folded={folded}
+              onToggle={onToggle}
+              onSelect={onSelect}
+            />
+          ))}
+        </ul>
+      )}
+    </li>
+  );
+}
+
+function QuestionExplorer({
+  questions,
+  parents,
+  selectedId,
+  onSelect,
+}: {
+  questions: QuestionNode[];
+  parents: ReadonlyMap<string, string | undefined>;
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+}) {
+  // Sidebar-only folding, independent of the canvas branch collapse.
+  const [folded, setFolded] = usePersistentState<string[]>("rabbithole:question-explorer-folded", []);
+  const foldedSet = new Set(folded);
+  const forest = questionForest(questions, parents);
+  if (!forest.length) return <p className="text-xs text-muted-foreground">No questions yet.</p>;
+  return (
+    <ul className="-mx-1 space-y-0.5" role="tree" aria-label="Questions">
+      {forest.map((item) => (
+        <QuestionRow
+          key={item.node.id}
+          item={item}
+          depth={0}
+          selectedId={selectedId}
+          folded={foldedSet}
+          onToggle={(id) => setFolded((f) => (f.includes(id) ? f.filter((x) => x !== id) : [...f, id]))}
+          onSelect={onSelect}
+        />
+      ))}
+    </ul>
+  );
+}
+
 export function ResearchSidebar({
   nodes,
+  questionParents,
   activity,
   selectedId,
   inputRef,
@@ -130,6 +260,8 @@ export function ResearchSidebar({
   onSelect,
 }: {
   nodes: ResearchNode[];
+  /** Question id -> parent question id (undefined for roots). */
+  questionParents: ReadonlyMap<string, string | undefined>;
   activity: ActivityEntry[];
   selectedId: string | null;
   inputRef: RefObject<HTMLTextAreaElement | null>;
@@ -138,18 +270,17 @@ export function ResearchSidebar({
   onSelect: (id: string) => void;
 }) {
   const [draft, setDraft] = useState("");
-  const [allQuestions, setAllQuestions] = useState(false);
   const submit = () => {
     const q = draft.trim();
     if (!q || busy) return;
     onAddQuestion(q);
     setDraft("");
   };
-  const questions = nodes.filter((n) => n.type === "question");
+  const questions = nodes.filter((n): n is QuestionNode => n.type === "question");
 
   return (
     // Fixed input on top, one scroll region below: the page itself never scrolls.
-    <div className="flex h-full min-h-0 w-72 flex-col overflow-hidden">
+    <div className="flex h-full min-h-0 w-72 max-w-full flex-col overflow-hidden">
       <div className="shrink-0 p-3">
         <div className="rounded-xl border border-white/10 bg-background/60 p-1.5 transition-colors focus-within:border-violet-400/40">
           <Textarea
@@ -182,32 +313,12 @@ export function ResearchSidebar({
 
       <div className="rh-scroll min-h-0 flex-1 overflow-x-hidden overflow-y-auto border-t border-white/[0.06]">
         <Section id="questions" title="Questions" count={questions.length}>
-          <ul className="space-y-0.5">
-            {(allQuestions ? questions : questions.slice(0, QUESTIONS_PREVIEW)).map((q) => (
-              <li key={q.id}>
-                <button
-                  type="button"
-                  onClick={() => onSelect(q.id)}
-                  className={cn(
-                    "flex w-full min-w-0 items-start gap-2 rounded-md px-2 py-1.5 text-left text-xs leading-snug text-foreground/85 transition-colors hover:bg-white/[0.04]",
-                    q.id === selectedId && "bg-white/[0.06] text-foreground",
-                  )}
-                >
-                  <span className="mt-1 size-1.5 shrink-0 rounded-full bg-violet-400" />
-                  <span className="line-clamp-2 break-words">{q.data.label}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-          {questions.length > QUESTIONS_PREVIEW && (
-            <button
-              type="button"
-              onClick={() => setAllQuestions(!allQuestions)}
-              className="mt-1.5 px-2 text-xs text-muted-foreground hover:text-foreground"
-            >
-              {allQuestions ? "Show less" : `Show ${questions.length - QUESTIONS_PREVIEW} more`}
-            </button>
-          )}
+          <QuestionExplorer
+            questions={questions}
+            parents={questionParents}
+            selectedId={selectedId}
+            onSelect={onSelect}
+          />
         </Section>
         <Section id="activity" title="Activity" count={activity.length}>
           <Activity activity={activity} />

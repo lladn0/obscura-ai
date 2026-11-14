@@ -144,14 +144,6 @@ function evidenceTrail(node: ResearchNode, nodes: ResearchNode[], edges: Researc
   return items;
 }
 
-const STANCE_STYLE = {
-  supports: "text-emerald-300",
-  disputes: "text-rose-300",
-  cites: "text-muted-foreground",
-} as const;
-
-const STATUS_LABEL = { verified: "Supported", contested: "Disputed", unverified: "Unverified" } as const;
-
 export function EvidenceTrail({
   node,
   nodes,
@@ -165,40 +157,22 @@ export function EvidenceTrail({
 }) {
   if (node.type !== "claim" && node.type !== "insight" && node.type !== "evidence") return null;
   const items = evidenceTrail(node, nodes, edges);
-  const status = node.type === "claim" ? (node.data.verification ?? (items.length ? undefined : "unverified")) : undefined;
 
   return (
     <div>
-      <h3 className="mb-2 flex items-center gap-2 text-[11px] tracking-wide text-muted-foreground uppercase">
-        Evidence trail
-        {status && (
-          <span
-            className={cn(
-              "rounded-full border px-1.5 py-px text-[10px] tracking-normal normal-case",
-              status === "verified" && "border-emerald-400/30 text-emerald-300",
-              status === "contested" && "border-rose-400/30 text-rose-300",
-              status === "unverified" && "border-amber-400/30 text-amber-300",
-            )}
-          >
-            {STATUS_LABEL[status]}
-          </span>
-        )}
-      </h3>
+      <h3 className="mb-2 text-[11px] tracking-wide text-muted-foreground uppercase">Evidence trail</h3>
       {items.length === 0 ? (
         <p className="text-xs text-muted-foreground">No sources are linked to this node yet. Try Find Evidence.</p>
       ) : (
         <ul className="space-y-2">
           {items.map((item) => (
             <li key={item.key} className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-2.5 text-xs">
-              <span className={cn("text-[10px] font-medium tracking-wide uppercase", STANCE_STYLE[item.stance])}>
-                {item.stance === "cites" ? "Cited source" : item.stance}
-              </span>
               {item.excerpt ? (
-                <blockquote className="mt-1 border-l-2 border-white/15 pl-2 leading-relaxed text-foreground/85 italic">
+                <blockquote className="border-l-2 border-white/15 pl-2 leading-relaxed text-foreground/85 italic">
                   “{item.excerpt}”
                 </blockquote>
               ) : (
-                <p className="mt-1 text-muted-foreground">No excerpt captured for this source.</p>
+                <p className="text-muted-foreground">No excerpt captured for this source.</p>
               )}
               {item.source && (
                 <div className="mt-1.5 flex min-w-0 items-center gap-1.5">

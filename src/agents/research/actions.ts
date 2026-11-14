@@ -358,7 +358,7 @@ async function gaps(a: ActionRequest, e: Emitter, config: LangGraphRunnableConfi
     streamedFields: ["QUESTION", "WHY"],
     onRecordStart: (r) => {
       if (r.index >= 3) return;
-      e.created(gapId(r), "question", { status: "open", gap: "unanswered" });
+      e.created(gapId(r), "question", { status: "open", gap: "unanswered", parentQuestionId: t.questionId });
       e.edge(gapId(r), "related_to", t.id);
     },
     onFieldDelta: (r, field, delta) => {

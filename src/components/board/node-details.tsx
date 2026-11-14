@@ -8,7 +8,8 @@ import {
   UnfoldVertical,
   Crosshair,
   PanelRightClose,
-  MessageSquarePlus,
+  ArrowUp,
+  Loader2,
   PenLine,
   PinOff,
   SlidersHorizontal,
@@ -24,17 +25,10 @@ import { cn } from "@/lib/utils";
 import type { ActionNote } from "@/agents/research/use-research-agent";
 import type { NodeAction } from "@/agents/research/protocol";
 import { EvidenceTrail, InvestigateActions } from "./node-investigate";
-import { ConfidenceBar, ImageCredit, ImageLightbox } from "./nodes";
+import { ImageCredit, ImageLightbox } from "./nodes";
 import { KIND_STYLES, RELATION_STYLES } from "./styles";
 
 const CONNECTIONS_PREVIEW = 4;
-
-const VERIFICATION_TEXT = { verified: "text-emerald-300", unverified: "text-amber-300", contested: "text-rose-300" } as const;
-const VERIFICATION_HINT = {
-  verified: "Stated in at least one cited source.",
-  unverified: "Not clearly supported by the retrieved sources.",
-  contested: "Sources disagree or the claim is disputed.",
-} as const;
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -51,33 +45,10 @@ function KindFields({ node }: { node: ResearchNode }) {
       return node.data.status ? <Field label="Status"><span className="capitalize">{node.data.status}</span></Field> : null;
     case "claim":
     case "insight":
-      return (
-        <>
-          {node.data.confidence !== undefined && (
-            <Field label="Confidence">
-              <ConfidenceBar
-                value={node.data.confidence}
-                className={node.type === "claim" ? "bg-sky-400/80" : "bg-emerald-400/80"}
-              />
-            </Field>
-          )}
-          {node.type === "claim" && node.data.verification && (
-            <Field label="Evidence status">
-              <span className={cn("capitalize", VERIFICATION_TEXT[node.data.verification])}>{node.data.verification}</span>
-              <span className="mt-0.5 block text-xs text-muted-foreground">
-                {VERIFICATION_HINT[node.data.verification]}
-              </span>
-            </Field>
-          )}
-          {node.type === "claim" && !node.data.verification && node.data.contested && (
-            <Field label="Status"><span className="text-rose-300">Contested</span></Field>
-          )}
-        </>
-      );
+      return null;
     case "evidence":
       return (
         <>
-          {node.data.stance && <Field label="Stance"><span className="capitalize">{node.data.stance}</span></Field>}
           {node.data.quote && (
             <Field label="Quote">
               <blockquote className="border-l-2 border-amber-400/40 pl-2.5 text-muted-foreground italic">
@@ -110,89 +81,101 @@ function KindFields({ node }: { node: ResearchNode }) {
   }
 }
 
-/** Follow-up questions and extra context for a research question. */
-function QuestionTools({
-  forClaim,
-  context,
-  onFollowUp,
-  onSetContext,
-}: {
-  forClaim?: boolean;
-  context: string;
-  onFollowUp: (question: string) => void;
-  onSetContext: (context: string) => void;
-}) {
-  const [mode, setMode] = useState<"none" | "followUp" | "context">("none");
+/** Always-visible follow-up input for a question or claim (Enter sends, Shift+Enter new line). */
+function AskInline({ busy, onAsk }: { busy?: boolean; onAsk: (question: string) => void }) {
   const [text, setText] = useState("");
-  const open = (m: "followUp" | "context") => {
-    setMode(m);
-    setText(m === "context" ? context : "");
-  };
-  const submit = () => {
-    if (mode === "followUp" && text.trim()) onFollowUp(text.trim());
-    if (mode === "context") onSetContext(text.trim());
-    setMode("none");
+  const send = () => {
+    const q = text.trim();
+    if (!q || busy) return;
+    onAsk(q);
     setText("");
   };
   return (
-    <div className="space-y-2">
-      <div className="flex flex-wrap gap-1.5">
-        <Button variant={mode === "followUp" ? "secondary" : "outline"} size="xs" onClick={() => open("followUp")}>
-          <MessageSquarePlus /> {forClaim ? "Ask About This" : "Ask Follow-Up"}
-        </Button>
-        {!forClaim && (
+    <div className="flex items-end gap-1 rounded-lg border border-white/10 bg-background/60 p-1 transition-colors focus-within:border-violet-400/40">
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            send();
+          }
+        }}
+        rows={1}
+        placeholder="Ask a question about this..."
+        aria-label="Ask a question about this"
+        className="field-sizing-content max-h-28 min-h-7 min-w-0 flex-1 resize-none bg-transparent px-1.5 py-1 text-xs leading-relaxed outline-none placeholder:text-muted-foreground"
+      />
+      <Button
+        size="icon-xs"
+        className="mb-0.5 shrink-0"
+        aria-label="Ask"
+        title={busy ? "Researching follow-up…" : "Ask (Enter)"}
+        onClick={send}
+        disabled={!text.trim() || busy}
+      >
+        {busy ? <Loader2 className="animate-spin" /> : <ArrowUp />}
+      </Button>
+    </div>
+  );
+}
+
+/** Extra instructions for later research on a question. */
+function QuestionContext({ context, onSetContext }: { context: string; onSetContext: (context: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState("");
+  const save = () => {
+    onSetContext(text.trim());
+    setEditing(false);
+  };
+  if (!editing)
+    return (
+      <div className="space-y-1.5">
+        {context && (
+          <p className="rounded-md border border-white/[0.06] bg-white/[0.02] px-2 py-1.5 text-xs text-muted-foreground">
+            <span className="text-foreground/80">Context:</span> {context}
+          </p>
+        )}
         <Button
-          variant={mode === "context" ? "secondary" : "outline"}
+          variant="outline"
           size="xs"
-          onClick={() => open("context")}
+          onClick={() => {
+            setText(context);
+            setEditing(true);
+          }}
           title="Extra instructions used for later research on this question"
         >
           <SlidersHorizontal /> {context ? "Edit context" : "Add context"}
         </Button>
-        )}
       </div>
-      {context && mode !== "context" && (
-        <p className="rounded-md border border-white/[0.06] bg-white/[0.02] px-2 py-1.5 text-xs text-muted-foreground">
-          <span className="text-foreground/80">Context:</span> {context}
-        </p>
-      )}
-      {mode !== "none" && (
-        <div className="space-y-1.5">
-          <textarea
-            autoFocus
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                submit();
-              } else if (e.key === "Escape") setMode("none");
-            }}
-            rows={2}
-            placeholder={
-              mode === "followUp"
-                ? forClaim
-                  ? "e.g. Why did investors trust these ratings?"
-                  : "e.g. How did European banks contribute?"
-                : "e.g. Focus on the Lithuanian hackathon event, not the word “unfair”."
-            }
-            className="w-full resize-none rounded-md border border-white/15 bg-background/60 px-2 py-1.5 text-xs leading-relaxed outline-none focus:border-white/30"
-          />
-          <div className="flex gap-1.5">
-            <Button size="xs" onClick={submit} disabled={mode === "followUp" && !text.trim()}>
-              {mode === "followUp" ? "Research follow-up" : "Save context"}
-            </Button>
-            <Button variant="ghost" size="xs" onClick={() => setMode("none")}>
-              Cancel
-            </Button>
-          </div>
-          {mode === "context" && (
-            <p className="text-[10px] text-muted-foreground">
-              Used for Deep Dives, follow-ups and other research on this question. Existing findings are kept.
-            </p>
-          )}
-        </div>
-      )}
+    );
+  return (
+    <div className="space-y-1.5">
+      <textarea
+        autoFocus
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            save();
+          } else if (e.key === "Escape") setEditing(false);
+        }}
+        rows={2}
+        placeholder="e.g. Focus on the Lithuanian hackathon event, not the word “unfair”."
+        className="w-full resize-none rounded-md border border-white/15 bg-background/60 px-2 py-1.5 text-xs leading-relaxed outline-none focus:border-white/30"
+      />
+      <div className="flex gap-1.5">
+        <Button size="xs" onClick={save}>
+          Save context
+        </Button>
+        <Button variant="ghost" size="xs" onClick={() => setEditing(false)}>
+          Cancel
+        </Button>
+      </div>
+      <p className="text-[10px] text-muted-foreground">
+        Used for Deep Dives, follow-ups and other research on this question. Existing findings are kept.
+      </p>
     </div>
   );
 }
@@ -231,6 +214,8 @@ export function NodeDetails({
     note?: ActionNote;
     onRun: (action: NodeAction) => void;
     onFollowUp: (question: string) => void;
+    /** A follow-up asked from this node is being researched. */
+    followUpBusy?: boolean;
     onSetContext: (context: string) => void;
   };
   onSelect: (id: string) => void;
@@ -351,10 +336,12 @@ export function NodeDetails({
         <InvestigateActions node={node} active={investigate.active} note={investigate.note} onRun={investigate.onRun} />
 
         {(node.type === "question" || node.type === "claim") && (
-          <QuestionTools
-            forClaim={node.type === "claim"}
-            context={node.type === "question" ? (node.data.context ?? "") : ""}
-            onFollowUp={investigate.onFollowUp}
+          <AskInline key={node.id} busy={investigate.followUpBusy} onAsk={investigate.onFollowUp} />
+        )}
+        {node.type === "question" && (
+          <QuestionContext
+            key={`ctx-${node.id}`}
+            context={node.data.context ?? ""}
             onSetContext={investigate.onSetContext}
           />
         )}

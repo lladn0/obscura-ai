@@ -343,22 +343,6 @@ function Pill({ children, className }: { children: ReactNode; className?: string
   );
 }
 
-export function ConfidenceBar({ value, className }: { value: number; className?: string }) {
-  return (
-    <div className="flex items-center gap-2" title={`Confidence ${Math.round(value * 100)}%`}>
-      <div className="h-1 flex-1 overflow-hidden rounded-full bg-white/8">
-        <div
-          className={cn("h-full rounded-full transition-[width] duration-500", className)}
-          style={{ width: `${Math.round(value * 100)}%` }}
-        />
-      </div>
-      <span className="text-[10px] text-muted-foreground tabular-nums">
-        {Math.round(value * 100)}%
-      </span>
-    </div>
-  );
-}
-
 const QuestionNodeView = memo(function QuestionNodeView({ id, data, selected }: NodeProps<QuestionNode>) {
   return (
     <Shell
@@ -385,12 +369,6 @@ const CHALLENGE_PILL = {
   alternative: "border-violet-400/40 bg-violet-400/10 text-violet-200",
 } as const;
 
-export const VERIFICATION_PILL = {
-  verified: "border-emerald-400/30 text-emerald-300 capitalize",
-  unverified: "border-amber-400/30 text-amber-300 capitalize",
-  contested: "border-rose-400/30 text-rose-300 capitalize",
-} as const;
-
 const ClaimNodeView = memo(function ClaimNodeView({ id, data, selected }: NodeProps<ClaimNode>) {
   return (
     <Shell
@@ -403,30 +381,15 @@ const ClaimNodeView = memo(function ClaimNodeView({ id, data, selected }: NodePr
       label={data.label}
       description={data.description}
       meta={
-        data.challenge ? (
+        data.challenge && (
           <Pill className={CHALLENGE_PILL[data.challenge]}>
             {data.challenge === "contradiction" ? "Contradiction" : "Alternative view"}
           </Pill>
-        ) : data.verification ? (
-          <Pill className={VERIFICATION_PILL[data.verification]}>{data.verification}</Pill>
-        ) : (
-          data.contested && <Pill className="border-rose-400/30 text-rose-300">Contested</Pill>
-        )
-      }
-      footer={
-        data.confidence !== undefined && (
-          <ConfidenceBar value={data.confidence} className="bg-sky-400/80" />
         )
       }
     />
   );
 });
-
-const STANCE_PILL = {
-  supporting: "border-emerald-400/30 text-emerald-300",
-  conflicting: "border-rose-400/30 text-rose-300",
-  neutral: "",
-} as const;
 
 const EvidenceNodeView = memo(function EvidenceNodeView({ id, data, selected }: NodeProps<EvidenceNode>) {
   return (
@@ -439,12 +402,6 @@ const EvidenceNodeView = memo(function EvidenceNodeView({ id, data, selected }: 
       selected={selected}
       label={data.label}
       description={data.description}
-      meta={
-        data.stance &&
-        data.stance !== "neutral" && (
-          <Pill className={cn("capitalize", STANCE_PILL[data.stance])}>{data.stance}</Pill>
-        )
-      }
     />
   );
 });
@@ -479,11 +436,6 @@ const InsightNodeView = memo(function InsightNodeView({ id, data, selected }: No
       label={data.label}
       description={data.description}
       className="bg-gradient-to-br from-emerald-500/15 via-card/95 to-card/95"
-      footer={
-        data.confidence !== undefined && (
-          <ConfidenceBar value={data.confidence} className="bg-emerald-400/80" />
-        )
-      }
     />
   );
 });

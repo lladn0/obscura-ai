@@ -124,6 +124,24 @@ function WorkspaceInner({ boardId }: { boardId: string }) {
     dispatch({ type: "log", message: "Research marked complete" });
   };
   const busy = useMemo(() => new Set(agent.active.keys()), [agent.active]);
+  // Follow-up question id -> the node it was asked from (drives the inline input's loading state).
+  const [followUps, setFollowUps] = useState<ReadonlyMap<string, string>>(new Map());
+  /**
+   * Question explorer parents: the stable `parentQuestionId` stamped when a question is created.
+   * Boards saved before that field existed fall back to the nearest question ancestor in the
+   * research hierarchy (which never includes manual arrows).
+   */
+  const questionParents = useMemo(() => {
+    const questions = new Set(state.nodes.filter((n) => n.type === "question").map((n) => n.id));
+    const out = new Map<string, string | undefined>();
+    for (const n of state.nodes) {
+      if (n.type !== "question") continue;
+      let p = n.data.parentQuestionId;
+      if (!p && !n.id.endsWith(":root")) p = ancestors(hierarchy, n.id).find((a) => questions.has(a));
+      out.set(n.id, p && p !== n.id && questions.has(p) ? p : undefined);
+    }
+    return out;
+  }, [state.nodes, hierarchy]);
   const [connectMode, setConnectMode] = useState(false);
 
   // Contextual images: fetched per node, independently of the research stream.
@@ -167,16 +185,22 @@ function WorkspaceInner({ boardId }: { boardId: string }) {
     return known;
   };
 
+  /** The research question that owns a node: the node itself if it is a question, else its nearest question ancestor. */
+  const owningQuestion = (nodeId: string) =>
+    [nodeId, ...ancestors(hierarchy, nodeId)].find((id) => state.nodes.find((n) => n.id === id)?.type === "question");
+
   /** A new question under an existing one, researched on its own (parent context only). */
   const askFollowUp = (parentId: string, question: string) => {
     const parent = state.nodes.find((n) => n.id === parentId);
     if (!parent || !question.trim()) return;
+    const questionId = `fq-${crypto.randomUUID().slice(0, 8)}`;
+    setFollowUps((m) => new Map(m).set(questionId, parentId));
     const label = (id: string) => state.nodes.find((n) => n.id === id)?.data.label ?? "";
     const request: ActionRequest = {
       kind: "followUp",
       actionId: `followUp-${crypto.randomUUID().slice(0, 8)}`,
       target: {
-        id: `fq-${crypto.randomUUID().slice(0, 8)}`,
+        id: questionId,
         kind: "question",
         label: question.trim(),
         // What the follow-up is asked about (a question, or a claim's statement).
@@ -184,6 +208,7 @@ function WorkspaceInner({ boardId }: { boardId: string }) {
         path: [...ancestors(hierarchy, parentId).reverse().map(label), parent.data.label],
         children: [],
         parentId,
+        questionId: owningQuestion(parentId),
         context: guidanceFor(parentId),
       },
       knownSources: knownSourcesOf(),
@@ -223,6 +248,7 @@ function WorkspaceInner({ boardId }: { boardId: string }) {
                 .map((n) => ({ label: n.data.label, kind: n.type, verification: verificationOf(n.id) }))
             : undefined,
         context: guidanceFor(node.id),
+        questionId: owningQuestion(node.id),
       },
       knownSources,
     };
@@ -383,6 +409,7 @@ function WorkspaceInner({ boardId }: { boardId: string }) {
                 note: agent.notes[selected.id],
                 onRun: (kind) => runNodeAction(selected.id, kind),
                 onFollowUp: (q) => askFollowUp(selected.id, q),
+                followUpBusy: [...agent.active.keys()].some((k) => followUps.get(k) === selected.id),
                 onSetContext: (context) =>
                   board.commit({ type: "editNode", nodeId: selected.id, edit: { context: context || undefined } }),
               }}
@@ -548,6 +575,7 @@ function WorkspaceInner({ boardId }: { boardId: string }) {
         >
           <ResearchSidebar
             nodes={state.nodes}
+            questionParents={questionParents}
             activity={state.activity}
             selectedId={selected?.id ?? null}
             inputRef={inputRef}

@@ -67,6 +67,8 @@ export type QuestionData = BaseNodeData & {
   gap?: "unanswered" | "missing-evidence" | "overlooked";
   /** Extra instructions from the user, used for later research on this question. */
   context?: string;
+  /** Stable parent in the question explorer (the question this one was asked under). Roots have none. */
+  parentQuestionId?: string;
 };
 
 export type Verification = "verified" | "unverified" | "contested";
