@@ -2,7 +2,7 @@
 
 import { memo, useState, type ReactNode } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { ChevronDown, Minus } from "lucide-react";
+import { ChevronDown, Loader2, Minus } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 import { NODE_WIDTH } from "@/graph/layout";
@@ -14,7 +14,7 @@ import type {
   QuestionNode,
   SourceNode,
 } from "@/graph/types";
-import { useBranch } from "./board-context";
+import { useBoardView, useBranch } from "./board-context";
 import { KIND_STYLES } from "./styles";
 
 /** Fold/unfold the branch below a node. Always visible when folded, on hover otherwise. */
@@ -66,6 +66,7 @@ function Shell({
   const [open, setOpen] = useState(false);
   const style = KIND_STYLES[kind];
   const Icon = style.icon;
+  const busy = useBoardView().busy.has(id);
   return (
     <div
       style={{ width: NODE_WIDTH[kind] }}
@@ -74,6 +75,7 @@ function Shell({
         "transition-[box-shadow,border-color] duration-200 hover:border-white/20",
         style.border,
         selected && cn("ring-2", style.ring),
+        busy && "rh-busy",
         className,
       )}
     >
@@ -90,6 +92,7 @@ function Shell({
         </span>
         <span className="ml-auto flex items-center gap-1">
           {meta}
+          {busy && <Loader2 className="size-3.5 animate-spin text-sky-300" aria-label="Investigating" />}
           {generating && (
             <span className="relative flex size-2" title="Generating">
               <span className="absolute inline-flex size-full animate-ping rounded-full bg-sky-400/60" />
@@ -180,11 +183,20 @@ const QuestionNodeView = memo(function QuestionNodeView({ id, data, selected }: 
       selected={selected}
       label={data.label}
       description={data.description}
-      className="bg-gradient-to-br from-violet-500/15 via-card/95 to-card/95 px-3.5 py-3"
-      labelClassName="text-[15px] font-semibold tracking-tight"
+      className={cn(
+        "bg-gradient-to-br via-card/95 to-card/95",
+        data.gap ? "border-dashed from-violet-500/5" : "from-violet-500/15 px-3.5 py-3",
+      )}
+      labelClassName={data.gap ? undefined : "text-[15px] font-semibold tracking-tight"}
+      meta={data.gap && <Pill className="border-violet-400/30 text-violet-300">Gap</Pill>}
     />
   );
 });
+
+const CHALLENGE_PILL = {
+  contradiction: "border-rose-400/40 bg-rose-400/10 text-rose-200",
+  alternative: "border-violet-400/40 bg-violet-400/10 text-violet-200",
+} as const;
 
 export const VERIFICATION_PILL = {
   verified: "border-emerald-400/30 text-emerald-300 capitalize",
@@ -202,7 +214,11 @@ const ClaimNodeView = memo(function ClaimNodeView({ id, data, selected }: NodePr
       label={data.label}
       description={data.description}
       meta={
-        data.verification ? (
+        data.challenge ? (
+          <Pill className={CHALLENGE_PILL[data.challenge]}>
+            {data.challenge === "contradiction" ? "Contradiction" : "Alternative view"}
+          </Pill>
+        ) : data.verification ? (
           <Pill className={VERIFICATION_PILL[data.verification]}>{data.verification}</Pill>
         ) : (
           data.contested && <Pill className="border-rose-400/30 text-rose-300">Contested</Pill>

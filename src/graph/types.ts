@@ -41,6 +41,8 @@ type BaseNodeData = {
 
 export type QuestionData = BaseNodeData & {
   status?: "open" | "exploring" | "answered";
+  /** Set on questions suggested by Research Gaps. */
+  gap?: "unanswered" | "missing-evidence" | "overlooked";
 };
 
 export type Verification = "verified" | "unverified" | "contested";
@@ -52,6 +54,8 @@ export type ClaimData = BaseNodeData & {
   verification?: Verification;
   /** Ids of the source nodes this claim cites. */
   sourceIds?: string[];
+  /** Set on counterpoints found by Challenge: a real contradiction or a competing perspective. */
+  challenge?: "contradiction" | "alternative";
 };
 
 export type EvidenceData = BaseNodeData & {

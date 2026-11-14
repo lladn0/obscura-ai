@@ -10,6 +10,8 @@ export type BoardView = {
   hierarchy: Hierarchy;
   collapsed: ReadonlySet<string>;
   toggleCollapse: (id: string) => void;
+  /** Nodes with a user action (Deep Dive, Challenge, ...) in flight. */
+  busy: ReadonlySet<string>;
 };
 
 export const BoardViewContext = createContext<BoardView | null>(null);

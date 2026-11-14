@@ -3,9 +3,11 @@ import { EventType, type BaseEvent, type RunAgentInput } from "@ag-ui/core";
 import { Observable } from "rxjs";
 
 import { researchGraph, type ResearchChunk } from "./graph";
-import { USAGE_EVENT, type ResearchRunProps, type ResearchState } from "./protocol";
-import { BranchScheduler } from "./scheduler";
+import { ACTION_RESULT_EVENT, USAGE_EVENT, type ActionResult, type ResearchRunProps, type ResearchState } from "./protocol";
 import { createSearch } from "./search";
+
+/** Nodes with a user action in flight (per server process): one action per node at a time. */
+const activeNodes = new Set<string>();
 
 /**
  * AG-UI agent that runs the LangGraph research workflow in-process and
@@ -20,6 +22,8 @@ export class ResearchAgent extends AbstractAgent {
       const props = (input.forwardedProps ?? {}) as Partial<ResearchRunProps>;
       const question = props.question?.trim() || "Untitled research question";
       const researchId = props.researchId ?? runId;
+      const action = props.action;
+      let ownsNode = false;
 
       let step: string | null = null;
       const enterStep = (name: string | null) => {
@@ -47,6 +51,18 @@ export class ResearchAgent extends AbstractAgent {
             emit({ type: EventType.CUSTOM, name: USAGE_EVENT, value: u } as BaseEvent);
             return;
           }
+          case "result": {
+            if (!action) return;
+            const value: ActionResult = {
+              actionId: action.actionId,
+              nodeId: action.target.id,
+              kind: action.kind,
+              message: chunk.message,
+              added: chunk.added,
+            };
+            emit({ type: EventType.CUSTOM, name: ACTION_RESULT_EVENT, value } as BaseEvent);
+            return;
+          }
           case "branch":
             emit({
               type: EventType.STATE_DELTA,
@@ -58,15 +74,25 @@ export class ResearchAgent extends AbstractAgent {
 
       (async () => {
         emit({ type: EventType.RUN_STARTED, threadId, runId } as BaseEvent);
-        const initial: ResearchState = { researchId, question, phase: "planning", branches: {} };
-        emit({ type: EventType.STATE_SNAPSHOT, snapshot: initial } as BaseEvent);
+        if (action) {
+          if (activeNodes.has(action.target.id)) throw new Error("An action is already running on this node.");
+          activeNodes.add(action.target.id);
+          ownsNode = true;
+        } else {
+          const initial: ResearchState = { researchId, question, phase: "planning", branches: {} };
+          emit({ type: EventType.STATE_SNAPSHOT, snapshot: initial } as BaseEvent);
+        }
 
         const stream = await researchGraph.stream(
-          { researchId, question },
+          { researchId, question, action },
           {
             streamMode: "custom",
             signal: abort.signal,
-            configurable: { scheduler: new BranchScheduler(), sourceNodes: new Set<string>(), search: createSearch() },
+            configurable: {
+              search: createSearch(),
+              knownSources: new Map(Object.entries(action?.knownSources ?? {})),
+              sourceNodes: new Set(Object.values(action?.knownSources ?? {})),
+            },
           },
         );
         for await (const chunk of stream) toEvents(chunk as ResearchChunk);
@@ -80,12 +106,16 @@ export class ResearchAgent extends AbstractAgent {
         subscriber.complete();
       })().catch((error: unknown) => {
         if (abort.signal.aborted) return subscriber.complete();
-        emit({ type: EventType.STATE_DELTA, delta: [{ op: "replace", path: "/phase", value: "error" }] } as BaseEvent);
+        if (!action)
+          emit({ type: EventType.STATE_DELTA, delta: [{ op: "replace", path: "/phase", value: "error" }] } as BaseEvent);
         emit({ type: EventType.RUN_ERROR, message: error instanceof Error ? error.message : String(error) } as BaseEvent);
         subscriber.complete();
       });
 
-      return () => abort.abort();
+      return () => {
+        abort.abort();
+        if (ownsNode) activeNodes.delete(action!.target.id);
+      };
     });
   }
 }

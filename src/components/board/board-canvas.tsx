@@ -86,7 +86,7 @@ function BranchFocusBar({
   );
 }
 
-export function BoardCanvas({ board }: { board: Board }) {
+export function BoardCanvas({ board, busy }: { board: Board; busy: ReadonlySet<string> }) {
   const { state, dispatch, hierarchy, visible, collapsed, mode } = board;
   const { fitView } = useReactFlow();
   const { nodes, edges } = state;
@@ -135,8 +135,9 @@ export function BoardCanvas({ board }: { board: Board }) {
       hierarchy,
       collapsed,
       toggleCollapse: (id) => dispatch({ type: "toggleCollapse", nodeId: id }),
+      busy,
     }),
-    [mode, hierarchy, collapsed, dispatch],
+    [mode, hierarchy, collapsed, dispatch, busy],
   );
 
   return (

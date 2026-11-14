@@ -200,6 +200,17 @@
   background-color: rgb(255 255 255 / 0.14);
 }
 
+/* A user action (Deep Dive, Challenge, ...) is running on this node. */
+.rh-busy {
+  animation: rh-busy 1.6s ease-in-out infinite;
+}
+
+@keyframes rh-busy {
+  50% {
+    box-shadow: 0 0 0 4px rgb(56 189 248 / 0.18), 0 0 24px -4px rgb(56 189 248 / 0.45);
+  }
+}
+
 /* Streaming text cursor. */
 .rh-caret {
   display: inline-block;

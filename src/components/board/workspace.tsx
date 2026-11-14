@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { ReactFlowProvider, useReactFlow } from "@xyflow/react";
 import { CopilotKitProvider } from "@copilotkit/react-core/v2";
 import { Menu } from "@base-ui/react/menu";
@@ -21,6 +21,7 @@ import {
   Sun,
 } from "lucide-react";
 
+import type { ActionRequest, NodeAction } from "@/agents/research/protocol";
 import { useResearchAgent } from "@/agents/research/use-research-agent";
 import { ancestors, descendants } from "@/graph/hierarchy";
 import { LAYOUT_MODES, type LayoutMode } from "@/graph/layout";
@@ -92,6 +93,50 @@ function WorkspaceInner() {
   const { state, dispatch, mode, setMode, hierarchy, visible, collapsed } = board;
   const { setCenter, getNode, getZoom } = useReactFlow();
   const agent = useResearchAgent(dispatch);
+  const busy = useMemo(() => new Set(agent.active.keys()), [agent.active]);
+
+  /**
+   * Run a user action on a node. The server keeps no board state, so the
+   * request carries just enough context: the node, its path to the root, its
+   * existing children, the branch (for gaps) and already-known source URLs.
+   */
+  const runNodeAction = (nodeId: string, kind: NodeAction) => {
+    const node = state.nodes.find((n) => n.id === nodeId);
+    if (!node) return;
+    const byId = new Map(state.nodes.map((n) => [n.id, n]));
+    const label = (id: string) => byId.get(id)?.data.label ?? "";
+    const verificationOf = (id: string) => {
+      const n = byId.get(id);
+      return n?.type === "claim" ? n.data.verification : undefined;
+    };
+    const knownSources: Record<string, string> = {};
+    for (const n of state.nodes) if (n.type === "source" && n.data.url) knownSources[n.data.url] = n.id;
+
+    const request: ActionRequest = {
+      kind,
+      actionId: `${kind}-${crypto.randomUUID().slice(0, 8)}`,
+      target: {
+        id: node.id,
+        kind: node.type,
+        label: node.data.label,
+        description: node.data.description,
+        verification: verificationOf(node.id),
+        path: ancestors(hierarchy, node.id).reverse().map(label),
+        children: (hierarchy.children.get(node.id) ?? []).map(label).filter(Boolean),
+        branch:
+          kind === "gaps"
+            ? descendants(hierarchy, node.id)
+                .map((id) => byId.get(id)!)
+                .filter((n) => n.type !== "source")
+                .map((n) => ({ label: n.data.label, kind: n.type, verification: verificationOf(n.id) }))
+            : undefined,
+      },
+      knownSources,
+    };
+    // Expand the node so the new results are visible as they stream in.
+    if (collapsed.has(node.id)) dispatch({ type: "toggleCollapse", nodeId: node.id });
+    void agent.runAction(node.data.researchId ?? "board", request);
+  };
   const selected = state.nodes.find((n) => n.selected) ?? null;
 
   const [sidebarOpen, setSidebarOpen] = usePersistentState("rabbithole:sidebar-open", true);
@@ -262,7 +307,7 @@ function WorkspaceInner() {
         </aside>
 
         <main className="relative min-w-0 flex-1">
-          <BoardCanvas board={board} />
+          <BoardCanvas board={board} busy={busy} />
         </main>
 
         <aside
@@ -303,6 +348,11 @@ function WorkspaceInner() {
               onCenter={() => centerOn(selected.id)}
               onToggleBranch={() => toggleBranch(selected.id)}
               onUnpin={() => board.unpin([selected.id])}
+              investigate={{
+                active: agent.active.get(selected.id),
+                note: agent.notes[selected.id],
+                onRun: (kind) => runNodeAction(selected.id, kind),
+              }}
               onCollapsePanel={() => setDetailsOpen(false)}
               onClose={() => dispatch({ type: "select", nodeId: null })}
             />

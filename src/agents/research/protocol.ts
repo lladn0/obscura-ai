@@ -1,4 +1,4 @@
-import type { EdgeRelation, NodeKind } from "@/graph/types";
+import type { EdgeRelation, NodeKind, Verification } from "@/graph/types";
 
 /**
  * Wire contract between the research agent and the board, carried over
@@ -26,6 +26,8 @@ export const GraphEvent = {
   NodeText: "graph.node.text",
   NodeCompleted: "graph.node.completed",
   EdgeCreated: "graph.edge.created",
+  /** A provisional node that failed validation; its edges go with it. */
+  NodeRemoved: "graph.node.removed",
 } as const;
 
 type Ids = { researchId: string; branchId: string; nodeId: string };
@@ -52,10 +54,41 @@ export type GraphEventPayload =
   | { name: typeof GraphEvent.NodeCreated; value: NodeCreated }
   | { name: typeof GraphEvent.NodeText; value: NodeText }
   | { name: typeof GraphEvent.NodeCompleted; value: NodeCompleted }
-  | { name: typeof GraphEvent.EdgeCreated; value: EdgeCreated };
+  | { name: typeof GraphEvent.EdgeCreated; value: EdgeCreated }
+  | { name: typeof GraphEvent.NodeRemoved; value: Ids };
 
 /** CUSTOM event carrying per-request cost accounting (ResearchUsage in graph.ts). */
 export const USAGE_EVENT = "research.usage";
 
-/** Input forwarded from the client with each run. */
-export type ResearchRunProps = { question: string; researchId: string };
+/** User-initiated investigations of one node. */
+export type NodeAction = "deepDive" | "challenge" | "findEvidence" | "gaps";
+
+/** Compact context about the node being investigated (the server keeps no board state). */
+export type ActionTarget = {
+  id: string;
+  kind: NodeKind;
+  label: string;
+  description?: string;
+  verification?: Verification;
+  /** Labels from the root question down to the node's parent. */
+  path: string[];
+  /** Labels of the node's existing children, to avoid duplicates. */
+  children: string[];
+  /** For gap analysis: the selected branch's nodes with their status. */
+  branch?: { label: string; kind: NodeKind; verification?: Verification }[];
+};
+
+export type ActionRequest = {
+  kind: NodeAction;
+  actionId: string;
+  target: ActionTarget;
+  /** Source URL -> existing source node id, so citations reuse board nodes. */
+  knownSources: Record<string, string>;
+};
+
+/** CUSTOM event summarising what an action found (or why it added nothing). */
+export const ACTION_RESULT_EVENT = "research.action.result";
+export type ActionResult = { actionId: string; nodeId: string; kind: NodeAction; message: string; added: number };
+
+/** Input forwarded from the client with each run: a new question, or an action on a node. */
+export type ResearchRunProps = { question: string; researchId: string; action?: ActionRequest };

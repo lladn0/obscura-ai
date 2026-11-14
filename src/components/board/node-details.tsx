@@ -17,6 +17,9 @@ import type { ResearchEdge, ResearchNode } from "@/graph/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import type { ActionNote } from "@/agents/research/use-research-agent";
+import type { NodeAction } from "@/agents/research/protocol";
+import { EvidenceTrail, InvestigateActions } from "./node-investigate";
 import { ConfidenceBar } from "./nodes";
 import { KIND_STYLES, RELATION_STYLES } from "./styles";
 
@@ -110,6 +113,7 @@ export function NodeDetails({
   branch,
   researchDepth,
   pinned,
+  investigate,
   onSelect,
   onCenter,
   onToggleBranch,
@@ -123,6 +127,7 @@ export function NodeDetails({
   branch: BranchInfo;
   researchDepth: number;
   pinned: boolean;
+  investigate: { active?: NodeAction; note?: ActionNote; onRun: (action: NodeAction) => void };
   onSelect: (id: string) => void;
   onCenter: () => void;
   onToggleBranch: () => void;
@@ -172,6 +177,10 @@ export function NodeDetails({
             <p className="mt-2 text-sm leading-relaxed break-words text-muted-foreground">{node.data.description}</p>
           )}
         </div>
+
+        <InvestigateActions node={node} active={investigate.active} note={investigate.note} onRun={investigate.onRun} />
+
+        <EvidenceTrail node={node} nodes={nodes} edges={edges} onSelect={onSelect} />
 
         <div className="flex flex-wrap gap-1.5">
           <Button variant="outline" size="xs" onClick={onCenter}>

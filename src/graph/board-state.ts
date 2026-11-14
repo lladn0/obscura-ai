@@ -52,7 +52,9 @@ export type StreamOp =
   | { op: "text"; nodeId: string; field: "label" | "description"; delta: string }
   /** `data` is validated final content and replaces provisional streamed text. */
   | { op: "done"; nodeId: string; data?: Record<string, unknown> }
-  | { op: "edge"; edgeId: string; source: string; target: string; relation: EdgeRelation };
+  | { op: "edge"; edgeId: string; source: string; target: string; relation: EdgeRelation }
+  /** Drop a provisional node that failed validation, with its edges. */
+  | { op: "remove"; nodeId: string };
 
 function applyStream(state: BoardState, ops: StreamOp[]): BoardState {
   const nodes = new Map(state.nodes.map((n) => [n.id, n]));
@@ -83,6 +85,11 @@ function applyStream(state: BoardState, ops: StreamOp[]): BoardState {
       case "done":
         patch(op.nodeId, (d) => ({ ...d, ...op.data, generating: false }) as ResearchNode["data"]);
         break;
+      case "remove":
+        nodes.delete(op.nodeId);
+        collapsed.delete(op.nodeId);
+        for (const [id, e] of edges) if (e.source === op.nodeId || e.target === op.nodeId) edges.delete(id);
+        break;
       case "edge":
         if (!nodes.has(op.source) || !nodes.has(op.target) || edges.has(op.edgeId)) break;
         edges.set(op.edgeId, {
@@ -99,16 +106,18 @@ function applyStream(state: BoardState, ops: StreamOp[]): BoardState {
   // New nodes start on a connected neighbour; the layout pass grows them outward.
   const edgeList = [...edges.values()];
   for (const id of created) {
+    if (!nodes.has(id)) continue; // created and removed in the same batch
     const neighbour = edgeList
       .map((e) => (e.source === id ? e.target : e.target === id ? e.source : null))
       .find((other) => other && !created.includes(other));
     if (neighbour) nodes.set(id, { ...nodes.get(id)!, position: nodes.get(neighbour)!.position });
   }
+  const collapsedChanged = collapsed.size !== state.collapsed.length || state.collapsed.some((id) => !collapsed.has(id));
   return {
     ...state,
     nodes: [...nodes.values()],
     edges: edgeList,
-    collapsed: collapsed.size === state.collapsed.length ? state.collapsed : [...collapsed],
+    collapsed: collapsedChanged ? [...collapsed] : state.collapsed,
   };
 }
 

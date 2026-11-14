@@ -2,7 +2,7 @@
  * Model per research role. Override with env vars, e.g.
  *   RESEARCH_MODEL_BRANCH=claude-sonnet-5-5
  */
-export type ResearchRole = "planner" | "branch" | "synthesis";
+export type ResearchRole = "planner" | "branch" | "synthesis" | "deepDive" | "challenge" | "evidence" | "gaps";
 
 const DEFAULT_MODELS: Record<ResearchRole, string> = {
   // Structured extraction with a fixed format: the cheap, fast model does well.
@@ -11,12 +11,21 @@ const DEFAULT_MODELS: Record<ResearchRole, string> = {
   // Weighing verified vs contested findings into one answer: worth Sonnet,
   // and its input is only a short list of finding titles.
   synthesis: "claude-sonnet-5-5",
+  deepDive: "claude-haiku-5-5",
+  // Telling a genuine contradiction from a different perspective needs judgement.
+  challenge: "claude-sonnet-5-5",
+  evidence: "claude-haiku-5-5",
+  gaps: "claude-haiku-5-5",
 };
 
 const ENV_KEYS: Record<ResearchRole, string> = {
   planner: "RESEARCH_MODEL_PLANNER",
   branch: "RESEARCH_MODEL_BRANCH",
   synthesis: "RESEARCH_MODEL_SYNTHESIS",
+  deepDive: "RESEARCH_MODEL_DEEP_DIVE",
+  challenge: "RESEARCH_MODEL_CHALLENGE",
+  evidence: "RESEARCH_MODEL_EVIDENCE",
+  gaps: "RESEARCH_MODEL_GAPS",
 };
 
 export const modelFor = (role: ResearchRole) => process.env[ENV_KEYS[role]] || DEFAULT_MODELS[role];
