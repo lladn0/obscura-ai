@@ -18,6 +18,7 @@ import {
   PanelRightOpen,
   ArrowLeft,
   CircleCheck,
+  MessageSquarePlus,
   RotateCcw,
   Square,
   Sun,
@@ -36,6 +37,8 @@ import { cn } from "@/lib/utils";
 import { BoardCanvas } from "./board-canvas";
 import { AgentStatus, CostIndicator } from "./agent-status";
 import { NodeDetails } from "./node-details";
+import { BottomSheet } from "./bottom-sheet";
+import { useIsMobile } from "@/lib/use-media";
 import { ResearchSidebar } from "./research-sidebar";
 import { usePersistentState } from "./use-persistent-state";
 
@@ -237,8 +240,11 @@ function WorkspaceInner({ boardId }: { boardId: string }) {
   const [focusMode, setFocusMode] = usePersistentState("rabbithole:focus-mode", false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  const showSidebar = sidebarOpen && !focusMode;
-  const detailsWidth = !selected || focusMode ? 0 : detailsOpen ? 320 : 44;
+  const isMobile = useIsMobile();
+  // Phones: the research panel is a drawer over the canvas, closed by default.
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const showSidebar = isMobile ? drawerOpen : sidebarOpen && !focusMode;
+  const detailsWidth = isMobile || !selected || focusMode ? 0 : detailsOpen ? 320 : 44;
 
   const centerOn = useCallback(
     (id: string) => {
@@ -246,7 +252,10 @@ function WorkspaceInner({ boardId }: { boardId: string }) {
       if (!node) return;
       const w = node.measured?.width ?? 0;
       const h = node.measured?.height ?? 0;
-      setCenter(node.position.x + w / 2, node.position.y + h / 2, { duration: 500, zoom: Math.max(getZoom(), 0.7) });
+      const zoom = Math.max(getZoom(), 0.7);
+      // Phones: the details sheet covers the lower half, so centre the node in the upper part.
+      const shift = window.matchMedia("(max-width: 767px)").matches ? (window.innerHeight * 0.24) / zoom : 0;
+      setCenter(node.position.x + w / 2, node.position.y + h / 2 + shift, { duration: 500, zoom });
     },
     [getNode, getZoom, setCenter],
   );
@@ -291,6 +300,7 @@ function WorkspaceInner({ boardId }: { boardId: string }) {
   const openResearchInput = useCallback(() => {
     setFocusMode(false);
     setSidebarOpen(true);
+    setDrawerOpen(true);
     requestAnimationFrame(() => inputRef.current?.focus());
   }, [setFocusMode, setSidebarOpen]);
 
@@ -345,168 +355,7 @@ function WorkspaceInner({ boardId }: { boardId: string }) {
   };
   const folded = state.collapsed.length > 0;
 
-  return (
-    <div className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
-      <header className="grid h-12 shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-3 border-b border-white/[0.06] px-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label={showSidebar ? "Hide sidebar" : "Show sidebar"}
-            title={showSidebar ? "Hide sidebar ([)" : "Show sidebar ([)"}
-            onClick={() => (focusMode ? openResearchInput() : setSidebarOpen(!sidebarOpen))}
-          >
-            {showSidebar ? <PanelLeftClose /> : <PanelLeftOpen />}
-          </Button>
-          <Link
-            href="/boards"
-            title="Back to Boards"
-            className="flex h-7 shrink-0 items-center gap-1 rounded-md px-1.5 text-xs text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground"
-          >
-            <ArrowLeft className="size-3.5" />
-            <span className="hidden sm:inline">Boards</span>
-          </Link>
-          <span className="truncate text-sm font-medium" title={state.title}>
-            {state.title}
-          </span>
-          {state.isDemo && (
-            <Badge
-              variant="outline"
-              className="shrink-0 border-amber-400/30 text-amber-200/80"
-              title="Illustrative content, not live research"
-            >
-              Demo
-            </Badge>
-          )}
-        </div>
-
-        <div className="flex items-center gap-2">
-          <LayoutSwitch mode={mode} onChange={setMode} />
-          <AgentStatus research={agent.research} running={agent.running} error={agent.error} />
-          {agent.anyActive && (
-            <Button
-              variant="ghost"
-              size="xs"
-              className="text-muted-foreground hover:text-rose-300"
-              title="Stop all research in progress"
-              onClick={agent.cancel}
-            >
-              <Square className="size-3" /> Cancel
-            </Button>
-          )}
-          <CostIndicator usage={agent.usage} />
-        </div>
-
-        <div className="flex items-center justify-end gap-1">
-          {session?.completedAt ? (
-            <span
-              className="hidden items-center gap-1 rounded-md px-2 text-xs text-emerald-300/90 md:flex"
-              title="You marked this research complete. Reopening the board later starts a new session."
-            >
-              <CircleCheck className="size-3.5" /> Completed · {formatDuration(session.activeMs)}
-            </span>
-          ) : (
-            <Button
-              variant="ghost"
-              size="sm"
-              title="Finish this research session (records your active time; separate from the AI finishing)"
-              onClick={markComplete}
-            >
-              <CircleCheck />
-              <span className="hidden md:inline">Mark Research Complete</span>
-            </Button>
-          )}
-          <Button
-            variant={focusMode ? "secondary" : "ghost"}
-            size="sm"
-            aria-pressed={focusMode}
-            title="Full canvas: hide side panels (F)"
-            onClick={() => setFocusMode(!focusMode)}
-          >
-            {focusMode ? <Minimize2 /> : <Maximize2 />}
-            <span className="hidden sm:inline">Full canvas</span>
-          </Button>
-          <Menu.Root>
-            <Menu.Trigger
-              render={<Button variant="ghost" size="icon-sm" aria-label="More board actions" />}
-            >
-              <Ellipsis />
-            </Menu.Trigger>
-            <Menu.Portal>
-              <Menu.Positioner align="end" sideOffset={6} className="z-50">
-                <Menu.Popup className="min-w-52 rounded-xl border border-white/10 bg-popover/95 p-1 shadow-xl backdrop-blur outline-none">
-                  <MenuItem icon={Maximize} onClick={board.fit}>Fit to view</MenuItem>
-                  <MenuItem icon={LayoutDashboard} onClick={() => board.unpin("all")}>
-                    Tidy layout
-                  </MenuItem>
-                  <MenuItem icon={folded ? UnfoldVertical : FoldVertical} onClick={folded ? board.expandAll : board.collapseToBranches}>
-                    {folded ? "Expand all branches" : "Collapse to main branches"}
-                  </MenuItem>
-                  <Menu.Separator className="my-1 h-px bg-white/[0.08]" />
-                  <MenuItem icon={RotateCcw} onClick={resetBoard}>
-                    {agent.anyActive ? "Clear board (keeps active research)" : "Reset demo board"}
-                  </MenuItem>
-                </Menu.Popup>
-              </Menu.Positioner>
-            </Menu.Portal>
-          </Menu.Root>
-        </div>
-      </header>
-
-      <div className="flex min-h-0 flex-1 overflow-hidden">
-        <aside
-          aria-label="Research"
-          aria-hidden={!showSidebar}
-          inert={!showSidebar}
-          className={cn(
-            "shrink-0 overflow-hidden bg-sidebar/60 transition-[width] duration-300 ease-out",
-            showSidebar && "border-r border-white/[0.06]",
-          )}
-          style={{ width: showSidebar ? 288 : 0 }}
-        >
-          <ResearchSidebar
-            nodes={state.nodes}
-            activity={state.activity}
-            selectedId={selected?.id ?? null}
-            inputRef={inputRef}
-            onAddQuestion={startResearch}
-            busy={agent.running}
-            onSelect={focusNode}
-          />
-        </aside>
-
-        <main className="relative min-w-0 flex-1">
-          <BoardCanvas
-            onUserSelect={(id) => nodeSelected(boardId, id)}
-            board={board}
-            busy={busy}
-            connectMode={connectMode}
-            onToggleConnect={() => setConnectMode((c) => !c)}
-          />
-        </main>
-
-        <aside
-          aria-label="Node details"
-          className={cn(
-            "shrink-0 overflow-hidden bg-sidebar/60 transition-[width] duration-300 ease-out",
-            detailsWidth > 0 && "border-l border-white/[0.06]",
-          )}
-          style={{ width: detailsWidth }}
-        >
-          {selected && !detailsOpen && (
-            <div className="flex justify-center pt-2">
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Show details"
-                title="Show details"
-                onClick={() => setDetailsOpen(true)}
-              >
-                <PanelRightOpen />
-              </Button>
-            </div>
-          )}
-          {selected && detailsOpen && (
+  const details = selected && (
             <NodeDetails
               key={selected.id}
               node={selected}
@@ -539,10 +388,226 @@ function WorkspaceInner({ boardId }: { boardId: string }) {
               }}
               onCollapsePanel={() => setDetailsOpen(false)}
               onClose={() => dispatch({ type: "select", nodeId: null })}
+              mobile={isMobile}
             />
+  );
+
+  return (
+    <div className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
+      <header
+        className="flex h-12 shrink-0 items-center gap-1 border-b border-white/[0.06] px-2 md:grid md:grid-cols-[1fr_auto_1fr] md:gap-3"
+        style={isMobile ? { paddingTop: "env(safe-area-inset-top)", height: "calc(3rem + env(safe-area-inset-top))" } : undefined}
+      >
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="hidden md:inline-flex"
+            aria-label={showSidebar ? "Hide sidebar" : "Show sidebar"}
+            title={showSidebar ? "Hide sidebar ([)" : "Show sidebar ([)"}
+            onClick={() => (focusMode ? openResearchInput() : setSidebarOpen(!sidebarOpen))}
+          >
+            {showSidebar ? <PanelLeftClose /> : <PanelLeftOpen />}
+          </Button>
+          <Link
+            href="/boards"
+            title="Back to Boards"
+            aria-label="Back to Boards"
+            className="flex h-9 shrink-0 items-center gap-1 rounded-md px-1.5 text-xs text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground md:h-7"
+          >
+            <ArrowLeft className="size-4 md:size-3.5" />
+            <span className="hidden sm:inline">Boards</span>
+          </Link>
+          <span className="truncate text-sm font-medium" title={state.title}>
+            {state.title}
+          </span>
+          {state.isDemo && (
+            <Badge
+              variant="outline"
+              className="shrink-0 border-amber-400/30 text-amber-200/80"
+              title="Illustrative content, not live research"
+            >
+              Demo
+            </Badge>
           )}
+        </div>
+
+        <div className="flex shrink-0 items-center gap-2">
+          <div className="hidden md:block">
+            <LayoutSwitch mode={mode} onChange={setMode} />
+          </div>
+          <AgentStatus research={agent.research} running={agent.running} error={agent.error} />
+          {agent.anyActive && (
+            <Button
+              variant="ghost"
+              size="xs"
+              className="hidden text-muted-foreground hover:text-rose-300 md:inline-flex"
+              title="Stop all research in progress"
+              onClick={agent.cancel}
+            >
+              <Square className="size-3" /> Cancel
+            </Button>
+          )}
+          <div className="hidden lg:block">
+            <CostIndicator usage={agent.usage} />
+          </div>
+        </div>
+
+        <div className="flex shrink-0 items-center justify-end gap-1">
+          {isMobile ? null : session?.completedAt ? (
+            <span
+              className="hidden items-center gap-1 rounded-md px-2 text-xs text-emerald-300/90 md:flex"
+              title="You marked this research complete. Reopening the board later starts a new session."
+            >
+              <CircleCheck className="size-3.5" /> Completed · {formatDuration(session.activeMs)}
+            </span>
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              title="Finish this research session (records your active time; separate from the AI finishing)"
+              onClick={markComplete}
+            >
+              <CircleCheck />
+              <span className="hidden md:inline">Mark Research Complete</span>
+            </Button>
+          )}
+          <Button
+            variant={focusMode ? "secondary" : "ghost"}
+            size="sm"
+            className="hidden md:inline-flex"
+            aria-pressed={focusMode}
+            title="Full canvas: hide side panels (F)"
+            onClick={() => setFocusMode(!focusMode)}
+          >
+            {focusMode ? <Minimize2 /> : <Maximize2 />}
+            <span className="hidden sm:inline">Full canvas</span>
+          </Button>
+          <Menu.Root>
+            <Menu.Trigger
+              render={<Button variant="ghost" size="icon-sm" aria-label="More board actions" />}
+            >
+              <Ellipsis />
+            </Menu.Trigger>
+            <Menu.Portal>
+              <Menu.Positioner align="end" sideOffset={6} className="z-50">
+                <Menu.Popup className="min-w-52 rounded-xl border border-white/10 bg-popover/95 p-1 shadow-xl backdrop-blur outline-none">
+                  {isMobile && (
+                    <>
+                      <MenuItem icon={MessageSquarePlus} onClick={openResearchInput}>
+                        Ask a research question
+                      </MenuItem>
+                      <MenuItem icon={mode === "sun" ? Network : Sun} onClick={() => setMode(mode === "sun" ? "tree" : "sun")}>
+                        {mode === "sun" ? "Switch to Tree layout" : "Switch to Sun layout"}
+                      </MenuItem>
+                      {!session?.completedAt && (
+                        <MenuItem icon={CircleCheck} onClick={markComplete}>
+                          Mark Research Complete
+                        </MenuItem>
+                      )}
+                      {agent.anyActive && (
+                        <MenuItem icon={Square} onClick={agent.cancel}>
+                          Cancel research
+                        </MenuItem>
+                      )}
+                      <Menu.Separator className="my-1 h-px bg-white/[0.08]" />
+                    </>
+                  )}
+                  <MenuItem icon={Maximize} onClick={board.fit}>Fit to view</MenuItem>
+                  <MenuItem icon={LayoutDashboard} onClick={() => board.unpin("all")}>
+                    Tidy layout
+                  </MenuItem>
+                  <MenuItem icon={folded ? UnfoldVertical : FoldVertical} onClick={folded ? board.expandAll : board.collapseToBranches}>
+                    {folded ? "Expand all branches" : "Collapse to main branches"}
+                  </MenuItem>
+                  <Menu.Separator className="my-1 h-px bg-white/[0.08]" />
+                  <MenuItem icon={RotateCcw} onClick={resetBoard}>
+                    {agent.anyActive ? "Clear board (keeps active research)" : "Reset demo board"}
+                  </MenuItem>
+                </Menu.Popup>
+              </Menu.Positioner>
+            </Menu.Portal>
+          </Menu.Root>
+        </div>
+      </header>
+
+      <div className="relative flex min-h-0 flex-1 overflow-hidden">
+        {isMobile && drawerOpen && (
+          <div className="absolute inset-0 z-30 bg-black/50" onClick={() => setDrawerOpen(false)} aria-hidden />
+        )}
+        <aside
+          aria-label="Research"
+          aria-hidden={!showSidebar}
+          inert={!showSidebar}
+          className={cn(
+            "shrink-0 overflow-hidden bg-sidebar/60 transition-[width] duration-300 ease-out",
+            showSidebar && "border-r border-white/[0.06]",
+            isMobile && "absolute inset-y-0 left-0 z-40 bg-sidebar/95 backdrop-blur-xl",
+          )}
+          style={{ width: showSidebar ? (isMobile ? "min(320px, 88vw)" : 288) : 0 }}
+        >
+          <ResearchSidebar
+            nodes={state.nodes}
+            activity={state.activity}
+            selectedId={selected?.id ?? null}
+            inputRef={inputRef}
+            onAddQuestion={(q) => {
+              setDrawerOpen(false);
+              startResearch(q);
+            }}
+            busy={agent.running}
+            onSelect={(id) => {
+              setDrawerOpen(false);
+              focusNode(id);
+            }}
+          />
+        </aside>
+
+        <main className="relative min-w-0 flex-1">
+          <BoardCanvas
+            onUserSelect={(id) => nodeSelected(boardId, id)}
+            board={board}
+            busy={busy}
+            connectMode={connectMode}
+            onToggleConnect={() => setConnectMode((c) => !c)}
+            onAskQuestion={openResearchInput}
+          />
+        </main>
+
+        <aside
+          aria-label="Node details"
+          className={cn(
+            "shrink-0 overflow-hidden bg-sidebar/60 transition-[width] duration-300 ease-out",
+            detailsWidth > 0 && "border-l border-white/[0.06]",
+          )}
+          style={{ width: detailsWidth }}
+        >
+          {selected && !detailsOpen && (
+            <div className="flex justify-center pt-2">
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Show details"
+                title="Show details"
+                onClick={() => setDetailsOpen(true)}
+              >
+                <PanelRightOpen />
+              </Button>
+            </div>
+          )}
+          {selected && detailsOpen && !isMobile && details}
         </aside>
       </div>
+
+      {isMobile && (
+        <BottomSheet
+          label="Node details"
+          open={!!selected}
+          onClose={() => dispatch({ type: "select", nodeId: null })}
+        >
+          {details}
+        </BottomSheet>
+      )}
     </div>
   );
 }

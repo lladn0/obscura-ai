@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "@xyflow/react/dist/style.css";
 import "./globals.css";
@@ -18,6 +18,14 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "RabbitHole AI",
   description: "Turn any research question into an interactive knowledge board.",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  // Content may extend under the notch/home indicator; pages pad with safe-area insets.
+  viewportFit: "cover",
+  themeColor: "#0b0a10",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

@@ -16,6 +16,7 @@ import {
   FoldVertical,
   Maximize,
   Minus,
+  Move,
   PenLine,
   Plus,
   ScanSearch,
@@ -31,10 +32,67 @@ import type { Board } from "@/graph/use-board";
 import type { EdgeRelation, ResearchEdge, ResearchNode } from "@/graph/types";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useIsMobile } from "@/lib/use-media";
 import { BoardViewContext, type BoardView } from "./board-context";
 import { nodeTypes } from "./nodes";
 import { edgeTypes, RelationMarkers, type DisplayEdge } from "./relation-edge";
 import { MANUAL_RELATIONS, RELATION_STYLES } from "./styles";
+
+/** Phones: one compact floating bar (pinch replaces the zoom buttons; Move mode replaces dragging). */
+function MobileControls({
+  board,
+  connectMode,
+  onToggleConnect,
+  onAddNote,
+  moveMode,
+  onToggleMove,
+}: {
+  board: Board;
+  connectMode: boolean;
+  onToggleConnect: () => void;
+  onAddNote: () => void;
+  moveMode: boolean;
+  onToggleMove: () => void;
+}) {
+  const btn = "size-10 rounded-xl [&_svg:not([class*='size-'])]:size-[18px]";
+  return (
+    <Panel position="bottom-center" className="!mb-[calc(env(safe-area-inset-bottom)+12px)]">
+      <div className="flex items-center gap-0.5 rounded-2xl border border-white/10 bg-card/90 p-1 shadow-lg backdrop-blur">
+        <Button variant="ghost" className={btn} aria-label="Add note" onClick={onAddNote}>
+          <StickyNote />
+        </Button>
+        <Button
+          variant={connectMode ? "secondary" : "ghost"}
+          className={cn(btn, connectMode && "text-sky-300")}
+          aria-pressed={connectMode}
+          aria-label="Connect nodes"
+          onClick={onToggleConnect}
+        >
+          <Spline />
+        </Button>
+        <Button
+          variant={moveMode ? "secondary" : "ghost"}
+          className={cn(btn, moveMode && "text-amber-300")}
+          aria-pressed={moveMode}
+          aria-label="Move nodes"
+          onClick={onToggleMove}
+        >
+          <Move />
+        </Button>
+        <div className="mx-0.5 h-5 w-px bg-white/10" />
+        <Button variant="ghost" className={btn} aria-label="Collapse all" onClick={board.collapseToBranches}>
+          <FoldVertical />
+        </Button>
+        <Button variant="ghost" className={btn} aria-label="Expand all" onClick={board.expandAll}>
+          <UnfoldVertical />
+        </Button>
+        <Button variant="ghost" className={btn} aria-label="Fit to view" onClick={board.fit}>
+          <Maximize />
+        </Button>
+      </div>
+    </Panel>
+  );
+}
 
 function CanvasControls({
   board,
@@ -297,7 +355,10 @@ export function BoardCanvas({
   connectMode,
   onToggleConnect,
   onUserSelect,
+  onAskQuestion,
 }: {
+  /** Opens the research question input (empty board). */
+  onAskQuestion?: () => void;
   /** Deliberate node selection by the user (for engagement statistics). */
   onUserSelect?: (nodeId: string) => void;
   board: Board;
@@ -313,6 +374,17 @@ export function BoardCanvas({
   const selectedEdge = selectedNode ? null : (edges.find((e) => e.selected) ?? null);
   const wrapper = useRef<HTMLDivElement>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
+  const isMobile = useIsMobile();
+  // Touch: nodes only move in Move mode, and Connect works by tapping source, then destination.
+  const [moveMode, setMoveMode] = useState(false);
+  const [connectFrom, setConnectFrom] = useState<string | null>(null);
+  const tapConnect = isMobile && connectMode;
+  const from = tapConnect ? connectFrom : null;
+  const toggleConnect = () => {
+    setConnectFrom(null);
+    setMoveMode(false);
+    onToggleConnect();
+  };
 
   const openMenu = (e: MouseEvent | React.MouseEvent, nodeId?: string) => {
     e.preventDefault();
@@ -361,9 +433,10 @@ export function BoardCanvas({
       nodes.map((n): ResearchNode => {
         const hidden = n.type === "note" ? hiddenNotes.has(n.id) : !visible.has(n.id);
         const dim = !!branch && !branch.has(n.id);
+        if (n.id === from) return { ...n, hidden, className: "rh-connect-source" };
         return hidden || dim || n.hidden ? { ...n, hidden, className: dim ? "rh-dim" : undefined } : n;
       }),
-    [nodes, visible, branch, hiddenNotes],
+    [nodes, visible, branch, hiddenNotes, from],
   );
 
   const displayEdges = useMemo(
@@ -413,27 +486,48 @@ export function BoardCanvas({
         onNodeDragStart={board.stopAnimation}
         onNodeDragStop={(_, __, dragged) => board.pinDragged(dragged.map((n) => n.id))}
         onPaneClick={() => dispatch({ type: "select", nodeId: null })}
-        onNodeDoubleClick={(_, node) => board.setEditing(node.id)}
-        onNodeClick={(_, node) => onUserSelect?.(node.id)}
+        onNodeDoubleClick={(_, node) =>
+          isMobile
+            ? fitView({ nodes: [{ id: node.id }], maxZoom: 1.2, duration: 400, padding: 0.4 })
+            : board.setEditing(node.id)
+        }
+        onNodeClick={(_, node) => {
+          if (tapConnect) {
+            if (!connectFrom) return setConnectFrom(node.id);
+            if (node.id !== connectFrom)
+              board.commit({
+                type: "connect",
+                edgeId: `manual-${crypto.randomUUID().slice(0, 8)}`,
+                source: connectFrom,
+                target: node.id,
+              });
+            setConnectFrom(null);
+            return onToggleConnect();
+          }
+          onUserSelect?.(node.id);
+        }}
         onPaneContextMenu={(e) => openMenu(e)}
         onNodeContextMenu={(e, node) => openMenu(e, node.id)}
         // Manual links are visual only: never research, never hierarchy.
         onConnect={(c) =>
           board.commit({ type: "connect", edgeId: `manual-${crypto.randomUUID().slice(0, 8)}`, source: c.source, target: c.target })
         }
-        nodesConnectable={connectMode}
-        nodesDraggable={!connectMode}
+        nodesConnectable={connectMode && !isMobile}
+        nodesDraggable={isMobile ? moveMode : !connectMode}
+        elementsSelectable={!tapConnect}
         connectionMode={ConnectionMode.Loose}
         connectionRadius={40}
-        zoomOnDoubleClick={false}
+        // Phones: double-tap zooms (empty canvas) or focuses a node; desktop double-click edits.
+        zoomOnDoubleClick={isMobile}
         deleteKeyCode={null}
         colorMode="dark"
         fitView
-        fitViewOptions={{ padding: 0.15 }}
+        // Phones: keep cards readable instead of shrinking the whole graph to fit.
+        fitViewOptions={{ padding: 0.15, minZoom: isMobile ? 0.5 : undefined }}
         minZoom={0.15}
         maxZoom={2}
         proOptions={{ hideAttribution: true }}
-        className={cn("rh-board", connectMode && "rh-connecting")}
+        className={cn("rh-board", connectMode && !isMobile && "rh-connecting", tapConnect && "rh-tapconnect")}
       >
         <RelationMarkers />
         <Background
@@ -443,21 +537,57 @@ export function BoardCanvas({
           color="rgb(255 255 255 / 0.07)"
           bgColor="transparent"
         />
-        <CanvasControls
-          board={board}
-          connectMode={connectMode}
-          onToggleConnect={onToggleConnect}
-          onAddNote={board.addNoteAtCenter}
-        />
+        {isMobile ? (
+          !selectedNode &&
+          !selectedEdge && (
+            <MobileControls
+              board={board}
+              connectMode={connectMode}
+              onToggleConnect={toggleConnect}
+              onAddNote={board.addNoteAtCenter}
+              moveMode={moveMode}
+              onToggleMove={() => {
+                setMoveMode((m) => !m);
+                if (connectMode) toggleConnect();
+              }}
+            />
+          )
+        ) : (
+          <CanvasControls
+            board={board}
+            connectMode={connectMode}
+            onToggleConnect={onToggleConnect}
+            onAddNote={board.addNoteAtCenter}
+          />
+        )}
+        {isMobile && (tapConnect || moveMode) && (
+          <Panel position="top-center" className="!mt-2">
+            <div className="rh-fade-in flex items-center gap-2 rounded-full border border-sky-400/30 bg-card/95 py-1 pr-1 pl-3 text-xs text-sky-200 shadow-lg backdrop-blur">
+              {moveMode
+                ? "Move mode: drag cards to reposition"
+                : from
+                  ? "Now tap the destination node"
+                  : "Tap the source node"}
+              <Button
+                variant="secondary"
+                size="xs"
+                className="rounded-full"
+                onClick={() => (moveMode ? setMoveMode(false) : toggleConnect())}
+              >
+                {moveMode ? "Done" : "Cancel"}
+              </Button>
+            </div>
+          </Panel>
+        )}
         {selectedEdge && <EdgeEditor key={selectedEdge.id} edge={selectedEdge} board={board} />}
-        {connectMode && !selectedEdge && (
+        {connectMode && !isMobile && !selectedEdge && (
           <Panel position="top-center">
             <div className="rh-fade-in rounded-full border border-sky-400/30 bg-card/90 px-3 py-1 text-xs text-sky-200 shadow-lg backdrop-blur">
               Drag from one card onto another to connect them · Esc to finish
             </div>
           </Panel>
         )}
-        {branch && selectedId && selectedNode?.type !== "note" && !connectMode && (
+        {branch && selectedId && selectedNode?.type !== "note" && !connectMode && !isMobile && (
           <BranchFocusBar
             label={nodes.find((n) => n.id === selectedId)?.data.label ?? ""}
             size={[...branch].filter((id) => visible.has(id)).length}
@@ -473,8 +603,13 @@ export function BoardCanvas({
           />
         )}
         {nodes.length === 0 && (
-          <Panel position="top-center" className="mt-32 text-sm text-muted-foreground">
+          <Panel position="top-center" className="mt-32 flex flex-col items-center gap-3 text-center text-sm text-muted-foreground">
             Ask a research question to start your board.
+            {onAskQuestion && (
+              <Button size="sm" className="rounded-xl" onClick={onAskQuestion}>
+                Ask a question
+              </Button>
+            )}
           </Panel>
         )}
       </ReactFlow>

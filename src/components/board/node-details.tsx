@@ -216,7 +216,10 @@ export function NodeDetails({
   onDelete,
   onCollapsePanel,
   onClose,
+  mobile,
 }: {
+  /** Inside the mobile bottom sheet: full width, no side-panel controls. */
+  mobile?: boolean;
   node: ResearchNode;
   nodes: ResearchNode[];
   edges: ResearchEdge[];
@@ -257,7 +260,7 @@ export function NodeDetails({
   const shown = showAll ? connections : connections.slice(0, CONNECTIONS_PREVIEW);
 
   return (
-    <div className="flex h-full min-h-0 w-80 flex-col overflow-hidden">
+    <div className={cn("flex h-full min-h-0 flex-col overflow-hidden", mobile ? "w-full" : "w-80")}>
       <div className="flex shrink-0 items-center gap-2 border-b border-white/[0.06] px-3 py-2">
         <span className={cn("flex size-6 items-center justify-center rounded-md", style.chip)}>
           <Icon className="size-3.5" />
@@ -269,9 +272,11 @@ export function NodeDetails({
           </Badge>
         )}
         <div className="ml-auto flex items-center">
-          <Button variant="ghost" size="icon-sm" aria-label="Collapse panel" title="Collapse panel" onClick={onCollapsePanel}>
-            <PanelRightClose />
-          </Button>
+          {!mobile && (
+            <Button variant="ghost" size="icon-sm" aria-label="Collapse panel" title="Collapse panel" onClick={onCollapsePanel}>
+              <PanelRightClose />
+            </Button>
+          )}
           <Button variant="ghost" size="icon-sm" aria-label="Close details" title="Close (Esc)" onClick={onClose}>
             <X />
           </Button>

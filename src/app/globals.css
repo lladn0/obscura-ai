@@ -166,6 +166,15 @@
   stroke-dasharray: 5 4;
 }
 
+/* Tap-to-connect (touch): highlight the chosen source card. */
+.rh-board .react-flow__node.rh-connect-source .rh-node-card {
+  border-color: rgb(56 189 248 / 0.9);
+  box-shadow: 0 0 0 3px rgb(56 189 248 / 0.35);
+}
+.rh-board.rh-tapconnect .react-flow__node {
+  cursor: pointer;
+}
+
 /* Strip React Flow's default node chrome; cards style themselves. */
 .rh-board .react-flow__node {
   transition: opacity 200ms ease;
@@ -274,5 +283,34 @@
   .rh-edge-flow,
   .rh-fade-in {
     animation: none;
+  }
+}
+
+
+/* --- Mobile & accessibility ------------------------------------------------ */
+
+/* The board owns every gesture: no page scroll, bounce or pull-to-refresh. */
+.rh-board {
+  touch-action: none;
+  overscroll-behavior: contain;
+}
+
+@media (max-width: 767px) {
+  /* iOS zooms the page when focusing inputs smaller than 16px. */
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rh-node-card,
+  .rh-fade-in,
+  .rh-edge-flow {
+    animation: none !important;
+  }
+  .rh-edge-flow {
+    display: none;
   }
 }

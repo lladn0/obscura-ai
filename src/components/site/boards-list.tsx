@@ -101,16 +101,16 @@ function BoardCard({ board }: { board: BoardMeta }) {
             </Button>
           </span>
         ) : (
-          <span className="ml-auto flex items-center opacity-70 transition-opacity group-hover:opacity-100">
-            <Button variant="ghost" size="icon-xs" aria-label="Rename board" title="Rename" onClick={() => setRenaming(true)}>
+          <span className="ml-auto flex items-center md:opacity-70 md:transition-opacity md:group-hover:opacity-100">
+            <Button variant="ghost" size="icon-sm" className="size-9 md:size-7" aria-label="Rename board" title="Rename" onClick={() => setRenaming(true)}>
               <PenLine />
             </Button>
             <Button
               variant="ghost"
-              size="icon-xs"
+              size="icon-sm"
+              className="size-9 hover:text-rose-300 md:size-7"
               aria-label="Delete board"
               title="Delete"
-              className="hover:text-rose-300"
               onClick={() => setConfirm(true)}
             >
               <Trash2 />
@@ -130,8 +130,8 @@ export default function BoardsList() {
   const create = () => router.push(`/boards/${createBoard().id}`);
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-10">
-      <div className="flex flex-wrap items-end justify-between gap-4">
+    <div className="mx-auto max-w-6xl px-4 py-6 md:py-10">
+      <div className="flex items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Boards</h1>
           <p className="mt-1 text-sm text-muted-foreground">Your research boards, saved in this browser.</p>
@@ -155,7 +155,7 @@ export default function BoardsList() {
           </Button>
         </div>
       ) : (
-        <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="mt-6 grid gap-3 sm:grid-cols-2 md:mt-8 md:gap-4 lg:grid-cols-3">
           {boards.map((b) => (
             <BoardCard key={b.id} board={b} />
           ))}

@@ -10,10 +10,17 @@ import { buildHierarchy, defaultCollapsed, descendants, visibleIds, type Hierarc
 import { computeLayout, LAYOUT_MODES, sizeOf, type LayoutMode } from "./layout";
 import type { ResearchNode } from "./types";
 import { noteAttached, noteCreated } from "@/analytics/engagement";
+import { isMobileViewport, prefersReducedMotion } from "@/lib/use-media";
 
 const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
 
-const FIT = { padding: 0.15, duration: 500, maxZoom: 1 };
+const FIT_BASE = { padding: 0.15, duration: 500, maxZoom: 1 };
+/** Phones: don't shrink the graph below readable size; the user pans instead. */
+const fitOptions = () => ({
+  ...FIT_BASE,
+  minZoom: isMobileViewport() ? 0.5 : undefined,
+  duration: prefersReducedMotion() ? 0 : FIT_BASE.duration,
+});
 
 function loadMode(boardId: string): LayoutMode {
   try {
@@ -153,6 +160,7 @@ export function useBoard(boardId: string) {
   const animateTo = useCallback(
     (targets: Map<string, XYPosition>, from: Map<string, XYPosition>, onDone?: () => void, duration = 600) => {
       stopAnimation();
+      if (prefersReducedMotion()) duration = 1;
       const start = performance.now();
       const step = (now: number) => {
         const t = Math.min(1, (now - start) / duration);
@@ -215,7 +223,7 @@ export function useBoard(boardId: string) {
 
       pendingFit.current ||= fit;
       animateTo(targets, from, () => {
-        if (pendingFit.current) fitView(FIT);
+        if (pendingFit.current) fitView(fitOptions());
         pendingFit.current = false;
       });
     },
@@ -416,7 +424,7 @@ export function useBoard(boardId: string) {
     deleteNode,
     editingId,
     setEditing,
-    fit: useCallback(() => fitView(FIT), [fitView]),
+    fit: useCallback(() => fitView(fitOptions()), [fitView]),
   };
 }
 

@@ -156,7 +156,7 @@ export default function StatisticsView() {
   const comp = (k: ComponentKey) => stats.components.find((c) => c.key === k)!;
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-10">
+    <div className="mx-auto max-w-6xl px-4 py-6 md:py-10">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Statistics</h1>
@@ -166,7 +166,7 @@ export default function StatisticsView() {
           value={boardId ?? ""}
           onChange={(e) => setBoardId(e.target.value || null)}
           aria-label="Filter by board"
-          className="h-9 max-w-xs rounded-lg border border-white/10 bg-card px-3 text-sm outline-none focus:border-white/25"
+          className="h-10 w-full max-w-full rounded-lg border sm:w-auto sm:max-w-xs border-white/10 bg-card px-3 text-sm outline-none focus:border-white/25"
         >
           <option value="">All boards</option>
           {boards.map((b) => (
@@ -192,20 +192,20 @@ export default function StatisticsView() {
       ) : (
         <>
           {/* Overall score */}
-          <section className="relative mt-8 overflow-hidden rounded-3xl border border-white/[0.08] bg-card/60 p-6 sm:p-8">
+          <section className="relative mt-6 overflow-hidden rounded-3xl border border-white/[0.08] bg-card/60 p-5 sm:mt-8 sm:p-8">
             <div
               aria-hidden
               className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_50%_80%_at_0%_50%,rgb(139_92_246/0.18),transparent_70%)]"
             />
             <div className="relative flex flex-col items-center gap-8 sm:flex-row">
               <ScoreRing value={stats.overall} />
-              <div className="min-w-0 flex-1">
+              <div className="min-w-0 flex-1 text-center sm:text-left">
                 <h2 className="text-xl font-semibold tracking-tight">Cognitive Engagement Score</h2>
                 <p className="mt-1 text-sm text-muted-foreground">
                   The average of the components below that have enough data (
                   {stats.components.filter((c) => c.score !== null).length} of 5).
                 </p>
-                <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-5">
+                <div className="mt-5 grid grid-cols-2 gap-2 text-left sm:grid-cols-5 sm:gap-3">
                   {stats.components.map((c) => (
                     <div key={c.key} className="rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-2">
                       <div className="text-[11px] text-muted-foreground">{c.label}</div>
