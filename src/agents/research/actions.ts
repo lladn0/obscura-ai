@@ -11,6 +11,7 @@ import {
   quote,
   quoteIsIn,
   research,
+  restatesClaim,
   sourceIds,
   streamFindings,
   UNTRUSTED_SOURCES,
@@ -31,8 +32,11 @@ import { researchScheduler } from "./scheduler";
 
 type Result = { message: string; added: number };
 
+export const guidanceOf = (t: ActionTarget) =>
+  t.context?.length ? `\nUser guidance (follow it): ${t.context.join(" ")}` : "";
+
 const contextOf = (t: ActionTarget) =>
-  `Research question: ${t.path[0] ?? t.label}\nLocation in the research map: ${[...t.path, t.label].join(" > ")}`;
+  `Research question: ${t.path[0] ?? t.label}\nLocation in the research map: ${[...t.path, t.label].join(" > ")}${guidanceOf(t)}`;
 
 const describe = (t: ActionTarget) => `${t.label}${t.description ? ` — ${t.description}` : ""}`;
 
@@ -146,7 +150,8 @@ async function challenge(a: ActionRequest, e: Emitter, ctx: Configurable, config
       const parsed = CounterSchema.safeParse(r.fields);
       const c = parsed.success ? parsed.data : null;
       const cited = c ? c.SOURCES.filter((sid) => byId.has(sid)) : [];
-      const quotedSid = c?.QUOTE ? cited.find((sid) => quoteIsIn(c.QUOTE!, byId.get(sid)!)) : undefined;
+      const quotedSid =
+        c?.QUOTE && !restatesClaim(c.QUOTE, t.label) ? cited.find((sid) => quoteIsIn(c.QUOTE!, byId.get(sid)!)) : undefined;
       // Grounding rule: a counterpoint survives only with a real source that contains its quote.
       if (!c || !quotedSid) {
         if (created.has(r.index)) remove(e, a.target.id, a.actionId, id);
@@ -268,7 +273,7 @@ async function findEvidence(a: ActionRequest, e: Emitter, ctx: Configurable, con
       const parsed = EvidenceSchema.safeParse(r.fields);
       const ev = parsed.success ? parsed.data : null;
       const sid = ev?.SOURCE.find((s) => byId.has(s));
-      if (!ev || !sid || !ev.QUOTE || !quoteIsIn(ev.QUOTE, byId.get(sid)!)) {
+      if (!ev || !sid || !ev.QUOTE || restatesClaim(ev.QUOTE, t.label) || !quoteIsIn(ev.QUOTE, byId.get(sid)!)) {
         if (createdEv.has(r.index)) remove(e, t.id, a.actionId, id);
         return;
       }
@@ -317,7 +322,9 @@ async function findEvidence(a: ActionRequest, e: Emitter, ctx: Configurable, con
 // --- Research Gaps: suggestions only, nothing is researched automatically -------------------------
 
 const GAPS_SYSTEM = `You review one branch of a research map and point out its gaps.
-Suggest 2 to 4 gaps, each a focused research question that would strengthen the branch:
+Suggest at most 3 gaps, and only ones that matter: a meaningful unanswered question about this branch's subject,
+or a key claim that lacks evidence. If the branch already covers its subject adequately, output nothing.
+Never suggest generic questions just to fill the map. Each gap is a focused research question:
 - unanswered: an important question the branch does not address
 - missing-evidence: a claim that is unverified or weakly supported
 - overlooked: a plausible explanation or factor the branch ignores
@@ -350,15 +357,15 @@ async function gaps(a: ActionRequest, e: Emitter, config: LangGraphRunnableConfi
     kinds: ["GAP"],
     streamedFields: ["QUESTION", "WHY"],
     onRecordStart: (r) => {
-      if (r.index >= 4) return;
+      if (r.index >= 3) return;
       e.created(gapId(r), "question", { status: "open", gap: "unanswered" });
       e.edge(gapId(r), "related_to", t.id);
     },
     onFieldDelta: (r, field, delta) => {
-      if (r.index < 4) e.text(gapId(r), field === "QUESTION" ? "label" : "description", delta);
+      if (r.index < 3) e.text(gapId(r), field === "QUESTION" ? "label" : "description", delta);
     },
     onRecordEnd: (r) => {
-      if (r.index >= 4) return;
+      if (r.index >= 3) return;
       const parsed = GapSchema.safeParse(r.fields);
       if (!parsed.success) return remove(e, t.id, a.actionId, gapId(r));
       e.completed(gapId(r), { label: parsed.data.QUESTION, description: parsed.data.WHY, gap: parsed.data.TYPE });
@@ -400,6 +407,8 @@ export async function runAction(action: ActionRequest, config: LangGraphRunnable
         return findEvidence(action, e, ctx, config);
       case "gaps":
         return gaps(action, e, config);
+      case "followUp":
+        throw new Error("Follow-up questions run through the research planner.");
     }
   }, "user");
 }

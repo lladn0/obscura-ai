@@ -2,10 +2,12 @@ import { Annotation, END, Send, START, StateGraph, type LangGraphRunnableConfig 
 import { z } from "zod";
 
 import { MAX_AUTO_DEPTH } from "@/graph/research-depth";
-import { runAction } from "./actions";
+import { guidanceOf, runAction } from "./actions";
 import {
   emitter,
   fieldTarget,
+  formatSources,
+  UNTRUSTED_SOURCES,
   IMAGE_RULE,
   imageData,
   imageQuery,
@@ -17,7 +19,7 @@ import {
 } from "./kit";
 import { streamClaude } from "./llm";
 import type { ActionRequest } from "./protocol";
-import { createRecordStream, type ParsedRecord } from "./record-stream";
+import { createRecordStream } from "./record-stream";
 import { researchScheduler } from "./scheduler";
 
 export type { ResearchChunk, ResearchUsage } from "./kit";
@@ -32,7 +34,18 @@ export type { ResearchChunk, ResearchUsage } from "./kit";
  * Runs that carry an `action` skip planning and investigate one node instead.
  */
 
-type BranchPlan = { branchId: string; nodeId: string; title: string; summary: string; query: string; depth: number };
+type BranchPlan = {
+  branchId: string;
+  nodeId: string;
+  title: string;
+  summary: string;
+  query: string;
+  depth: number;
+  /** What the research is about, as established by the grounding search. */
+  subject: string;
+  /** The question this branch serves (the root question, or a follow-up with its context). */
+  question: string;
+};
 
 const ResearchState = Annotation.Root({
   researchId: Annotation<string>,
@@ -47,6 +60,7 @@ const ResearchState = Annotation.Root({
 type State = typeof ResearchState.State;
 
 
+const MAX_DIRECTIONS = 6;
 const DirectionSchema = z.object({ TITLE: oneLine(120), SUMMARY: oneLine(400), QUERY: oneLine(200), IMAGE: imageQuery });
 
 const SynthesisSchema = z.object({
@@ -58,15 +72,41 @@ const SynthesisSchema = z.object({
 // --- Prompts --------------------------------------------------------------------
 
 const PLANNER_SYSTEM = `You are the planner of a research assistant that builds a visual knowledge map.
-Split the user's research question into 3 to 5 distinct, non-overlapping research directions that together answer it.
+
+Step 1, understand the question. Work out exactly what the user is asking about. The web sources below were
+retrieved for the question itself: use them to establish the identity of any named entity, event, product,
+organisation or unfamiliar term. Names are labels: never infer what a subject is from the ordinary meaning of the
+words in its name (for example, an event called "Unfair Weekend" is a named event, not a story about unfairness).
+
+${UNTRUSTED_SOURCES}
+
+Step 2, plan. Choose the research directions needed to answer the question about THAT subject.
+- Use as few directions as the question needs: a narrow factual question may need 1 or 2, a broad topic more
+  (at most ${MAX_DIRECTIONS}). Never add directions to reach a count; quality beats symmetry.
+- Every direction must directly serve the user's question about the identified subject. No generic filler, no
+  speculation, and no controversy, public reaction or history angles unless the question or the sources call for them.
+- Directions must not overlap.
+- QUERY is a focused web search query that names the identified subject explicitly.
 ${IMAGE_RULE}
+
+If the sources do not establish what the subject is and the question could reasonably mean different things,
+do not invent a narrative: output a single CLARIFY record and nothing else.
+
 Output ONLY records in exactly this format, no other text, no markdown:
+
+SUBJECT
+WHAT: <one sentence: what the subject is, grounded in the sources>
 
 DIRECTION
 TITLE: <direction title, at most 6 words>
 SUMMARY: <one sentence, at most 20 words, on what this direction investigates>
 QUERY: <a focused web search query for this direction>
 IMAGE: <specific image search query, or none>
+
+(or, only when the subject cannot be identified)
+
+CLARIFY
+QUESTION: <one short clarifying question for the user>
 
 Separate records with a blank line. Each field value stays on one line.`;
 
@@ -82,7 +122,119 @@ CONFIDENCE: <a number between 0 and 1>`;
 
 // --- Graph nodes ------------------------------------------------------------------
 
-/** Planner: root question node immediately, then 3-5 streamed direction nodes. */
+type PlanInput = {
+  researchId: string;
+  /** Prefix for generated ids (unique per run). */
+  idBase: string;
+  rootId: string;
+  /** The question to plan for (a follow-up keeps its parent's question as context). */
+  question: string;
+  /** Extra lines for the planner: parent question, user guidance. */
+  context?: string;
+  /** Grounding search query, when the question alone lacks its subject. */
+  searchQuery?: string;
+};
+
+/**
+ * Grounding search on the question itself, then one planner request that
+ * identifies the subject and streams only the directions it needs.
+ */
+async function planResearch(config: LangGraphRunnableConfig, input: PlanInput) {
+  const { researchId, idBase, rootId, question } = input;
+  const ctx = config.configurable as Configurable;
+  const root = emitter(config, researchId, "root");
+  const grounding = await research(root, ctx, "root", (input.searchQuery ?? question).slice(0, 200), question);
+
+  const branchOf = (n: number) => `${idBase}:b${n}`;
+  const emitters = new Map<string, ReturnType<typeof emitter>>();
+  const em = (n: number) => {
+    const id = branchOf(n);
+    if (!emitters.has(id)) emitters.set(id, emitter(config, researchId, id));
+    return emitters.get(id)!;
+  };
+  /** Direction number per record (records also include SUBJECT/CLARIFY). */
+  const dirNo = new Map<number, number>();
+  const branches: BranchPlan[] = [];
+  let subject = "";
+  let clarify = "";
+
+  const parser = createRecordStream({
+    kinds: ["SUBJECT", "DIRECTION", "CLARIFY"],
+    streamedFields: ["TITLE", "SUMMARY"],
+    onRecordStart: (r) => {
+      if (r.kind !== "DIRECTION" || dirNo.size >= MAX_DIRECTIONS) return;
+      const n = dirNo.size + 1;
+      dirNo.set(r.index, n);
+      const e = em(n);
+      e.created(`${branchOf(n)}:direction`, "claim");
+      e.edge(`${branchOf(n)}:direction`, "explains", rootId);
+    },
+    onFieldDelta: (r, field, delta) => {
+      const n = dirNo.get(r.index);
+      if (n) em(n).text(`${branchOf(n)}:direction`, fieldTarget(field), delta);
+    },
+    onRecordEnd: (r) => {
+      if (r.kind === "SUBJECT") {
+        subject = (r.fields.WHAT ?? "").replace(/\s+/g, " ").trim().slice(0, 300);
+        return;
+      }
+      if (r.kind === "CLARIFY") {
+        clarify = (r.fields.QUESTION ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
+        return;
+      }
+      const n = dirNo.get(r.index);
+      if (!n) return;
+      const e = em(n);
+      const nodeId = `${branchOf(n)}:direction`;
+      const parsed = DirectionSchema.safeParse(r.fields);
+      if (!parsed.success) {
+        e.completed(nodeId, { verification: "unverified" });
+        return;
+      }
+      const d = parsed.data;
+      e.completed(nodeId, { label: d.TITLE, description: d.SUMMARY, ...imageData(d.IMAGE) });
+      e.branch(d.TITLE, "queued");
+      branches.push({
+        branchId: branchOf(n),
+        nodeId,
+        title: d.TITLE,
+        summary: d.SUMMARY,
+        query: d.QUERY,
+        depth: 1,
+        subject,
+        question: input.context ? `${question}\n${input.context}` : question,
+      });
+    },
+  });
+
+  const { usage } = await streamClaude({
+    role: "planner",
+    branchId: "root",
+    system: PLANNER_SYSTEM,
+    prompt: `Research question: ${question}${input.context ? `\n${input.context}` : ""}\n\n${formatSources(grounding)}`,
+    effort: "low",
+    maxTokens: 4000,
+    signal: config.signal,
+    onText: parser.push,
+  });
+  parser.end();
+  root.usage({ kind: "llm", ...usage });
+
+  // Ambiguous subject: ask instead of inventing a narrative.
+  if (!branches.length && clarify) {
+    const id = `${idBase}:clarify`;
+    root.created(id, "question", { status: "open", gap: "unanswered" });
+    root.edge(id, "related_to", rootId);
+    root.text(id, "label", clarify);
+    root.completed(id, {
+      description: "The subject is ambiguous. Add context to the question (details panel) or ask a follow-up.",
+    });
+  }
+  if (subject) root.completed(rootId, { description: subject });
+  return { branches, clarify };
+}
+
+/** Planner: root question node immediately, then only the directions the question needs. */
 async function plan(state: State, config: LangGraphRunnableConfig) {
   const { researchId, question } = state;
   const rootId = `${researchId}:root`;
@@ -92,58 +244,10 @@ async function plan(state: State, config: LangGraphRunnableConfig) {
   root.text(rootId, "label", question);
   root.completed(rootId);
 
-  const branchOf = (r: ParsedRecord) => `${researchId}:b${r.index + 1}`;
-  const emitters = new Map<string, ReturnType<typeof emitter>>();
-  const em = (r: ParsedRecord) => {
-    const id = branchOf(r);
-    if (!emitters.has(id)) emitters.set(id, emitter(config, researchId, id));
-    return emitters.get(id)!;
-  };
-  const branches: BranchPlan[] = [];
+  const { branches, clarify } = await planResearch(config, { researchId, idBase: researchId, rootId, question });
+  if (branches.length === 0 && !clarify) throw new Error("Planning produced no research directions.");
 
-  const parser = createRecordStream({
-    kinds: ["DIRECTION"],
-    streamedFields: ["TITLE", "SUMMARY"],
-    onRecordStart: (r) => {
-      if (r.index >= 5) return;
-      const e = em(r);
-      e.created(`${branchOf(r)}:direction`, "claim");
-      e.edge(`${branchOf(r)}:direction`, "explains", rootId);
-    },
-    onFieldDelta: (r, field, delta) => {
-      if (r.index < 5) em(r).text(`${branchOf(r)}:direction`, fieldTarget(field), delta);
-    },
-    onRecordEnd: (r) => {
-      if (r.index >= 5) return;
-      const e = em(r);
-      const nodeId = `${branchOf(r)}:direction`;
-      const parsed = DirectionSchema.safeParse(r.fields);
-      if (!parsed.success) {
-        e.completed(nodeId, { verification: "unverified" });
-        return;
-      }
-      const d = parsed.data;
-      e.completed(nodeId, { label: d.TITLE, description: d.SUMMARY, ...imageData(d.IMAGE) });
-      e.branch(d.TITLE, "queued");
-      branches.push({ branchId: branchOf(r), nodeId, title: d.TITLE, summary: d.SUMMARY, query: d.QUERY, depth: 1 });
-    },
-  });
-
-  const { usage } = await streamClaude({
-    role: "planner",
-    branchId: "root",
-    system: PLANNER_SYSTEM,
-    prompt: `Research question: ${question}`,
-    effort: "low",
-    maxTokens: 4000,
-    signal: config.signal,
-    onText: parser.push,
-  });
-  parser.end();
-  root.usage({ kind: "llm", ...usage });
-  if (branches.length === 0) throw new Error("Planning produced no research directions.");
-
-  root.write({ type: "phase", phase: "researching" });
+  root.write({ type: "phase", phase: branches.length ? "researching" : "completed" });
   return { branches };
 }
 
@@ -169,8 +273,8 @@ async function researchBranch(state: State, config: LangGraphRunnableConfig) {
         branchId: b.branchId,
         parentId: b.nodeId,
         idPrefix: b.branchId,
-        prompt: `Research question: ${question}
-Research direction: ${b.title} — ${b.summary}`,
+        prompt: `Research question: ${b.question || question}
+${b.subject ? `Subject (as identified from the web): ${b.subject}\n` : ""}Research direction: ${b.title} — ${b.summary}`,
         sources,
       });
       e.branch(b.title, "done");
@@ -183,10 +287,46 @@ Research direction: ${b.title} — ${b.summary}`,
   }, "auto");
 }
 
-/** A user-initiated action on one node (Deep Dive, Challenge, Find Evidence, Research Gaps). */
+/**
+ * Follow-up question under an existing question: a new question node, then a
+ * focused plan and its branches. Inherits only the parent's question path and
+ * user guidance, never unrelated board content.
+ */
+async function followUp(state: State, config: LangGraphRunnableConfig) {
+  const a = state.action!;
+  const t = a.target;
+  const e = emitter(config, state.researchId, a.actionId);
+  e.created(t.id, "question", { status: "exploring" });
+  if (t.parentId) e.edge(t.id, "explains", t.parentId);
+  e.text(t.id, "label", t.label);
+  e.completed(t.id);
+
+  const context = [t.path.length ? `It is a follow-up within: ${t.path.join(" > ")}` : "", guidanceOf(t).trim()]
+    .filter(Boolean)
+    .join("\n");
+  const { branches } = await planResearch(config, {
+    researchId: state.researchId,
+    idBase: a.actionId,
+    rootId: t.id,
+    question: t.label,
+    context,
+    // "How did European banks contribute?" needs its parent's subject to search well.
+    searchQuery: `${t.label} ${t.path[t.path.length - 1] ?? ""}`.trim(),
+  });
+  const results = await Promise.all(branches.map((branch) => researchBranch({ ...state, branch }, config)));
+  const findings = results.reduce((sum, r) => sum + (("findings" in r && r.findings?.length) || 0), 0);
+  return {
+    added: branches.length + findings,
+    message: branches.length
+      ? `Follow-up researched ${branches.length} direction${branches.length > 1 ? "s" : ""} with ${findings} findings.`
+      : "The follow-up needs clarification before it can be researched.",
+  };
+}
+
+/** A user-initiated action on one node (Deep Dive, Challenge, Find Evidence, Research Gaps, Follow-up). */
 async function investigate(state: State, config: LangGraphRunnableConfig) {
   const e = emitter(config, state.researchId, state.action!.actionId);
-  const result = await runAction(state.action!, config);
+  const result = state.action!.kind === "followUp" ? await followUp(state, config) : await runAction(state.action!, config);
   e.write({ type: "result", ...result });
   return {};
 }

@@ -1,6 +1,15 @@
 "use client";
 
-import { ExternalLink, Loader2, Microscope, ScanSearch, Swords, Telescope, type LucideIcon } from "lucide-react";
+import {
+  ExternalLink,
+  Loader2,
+  MessageSquarePlus,
+  Microscope,
+  ScanSearch,
+  Swords,
+  Telescope,
+  type LucideIcon,
+} from "lucide-react";
 
 import type { ActionNote } from "@/agents/research/use-research-agent";
 import type { NodeAction } from "@/agents/research/protocol";
@@ -13,6 +22,7 @@ const ACTIONS: Record<NodeAction, { label: string; icon: LucideIcon; hint: strin
   challenge: { label: "Challenge This", icon: Swords, hint: "Search for credible evidence against this claim" },
   findEvidence: { label: "Find Evidence", icon: ScanSearch, hint: "Look for new sources for or against this claim" },
   gaps: { label: "Research Gaps", icon: Microscope, hint: "Suggest unanswered questions in this branch" },
+  followUp: { label: "Follow-Up", icon: MessageSquarePlus, hint: "Research a follow-up question under this one" },
 };
 
 /** Which actions make sense for a node. Sources and evidence are leaves of the trail. */

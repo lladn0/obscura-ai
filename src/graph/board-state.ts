@@ -26,7 +26,7 @@ export type BoardState = {
   deleted: string[];
 };
 
-export type NodeEdit = { label?: string; description?: string };
+export type NodeEdit = { label?: string; description?: string; context?: string };
 
 export type BoardAction =
   | { type: "nodesChange"; changes: NodeChange<ResearchNode>[] }
@@ -279,7 +279,17 @@ export function boardReducer(state: BoardState, action: BoardAction): BoardState
         ...state,
         nodes: state.nodes.map((n) =>
           n.id === action.nodeId
-            ? ({ ...n, data: { ...n.data, ...action.edit, userEdited: n.type !== "note" || undefined } } as ResearchNode)
+            ? ({
+                ...n,
+                data: {
+                  ...n.data,
+                  ...action.edit,
+                  userEdited:
+                    n.data.userEdited ||
+                    (n.type !== "note" && ("label" in action.edit || "description" in action.edit)) ||
+                    undefined,
+                },
+              } as ResearchNode)
             : n,
         ),
       };

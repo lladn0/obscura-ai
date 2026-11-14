@@ -51,13 +51,13 @@ export const quote = z
   .transform((s) => s?.trim().replace(/^["“]|["”]$/g, "") || undefined);
 
 /** Prompt rule for the optional IMAGE field of a record. */
-export const IMAGE_RULE = `IMAGE decides whether a picture genuinely helps a reader understand this item.
-Use one only for concrete visual subjects: anatomy and skeletal structures, organisms, historical artifacts,
-places and maps, buildings, machines and their components, scientific diagrams, artworks.
-For abstract concepts, definitions, finance, philosophy, statistics or plain text claims write: none.
-When useful, write a specific image search query naming the exact subject and view
-(e.g. "human temporal bone lateral view anatomical diagram"), never a generic topic picture,
-and never the same query for two different items.`;
+export const IMAGE_RULE = `IMAGE: decide per item, in any field, whether a real reference image would genuinely help a reader
+understand THIS item: a concrete thing that can be seen (an object, organism, body part, building, place or map,
+artwork, artifact, device or component, mechanism, celestial object, a verified event venue) or a standard diagram
+that explains it. Most items do not need one: abstract ideas, definitions, arguments, numbers, opinions, schedules
+and plain factual claims get none. Never add an image just because of the topic's field, and never a decorative one.
+When useful, write a specific search query naming exactly what the image must show
+(e.g. "human temporal bone lateral view anatomical diagram"); never a generic topic query, never the same query twice.`;
 
 /** IMAGE field: a specific image search query, or nothing. */
 export const imageQuery = z
@@ -158,6 +158,16 @@ export const quoteIsIn = (q: string, source: WebSource) => {
   );
 };
 
+/** True when the quote mostly repeats the claim's own words (no new evidence). */
+export const restatesClaim = (q: string, claim: string) => {
+  const words = new Set(normalise(q).split(" ").filter((w) => w.length > 3));
+  const claimWords = new Set(normalise(claim).split(" ").filter((w) => w.length > 3));
+  if (!words.size) return true;
+  let shared = 0;
+  for (const w of words) if (claimWords.has(w)) shared++;
+  return shared / words.size > 0.7;
+};
+
 /** One source node per URL across the whole board; created only the first time it is cited. */
 export function ensureSource(e: Emitter, ctx: Configurable, src: WebSource): string {
   const nodeId = ctx.knownSources.get(src.url) ?? `src:${urlKey(src.url)}`;
@@ -191,13 +201,20 @@ You receive one research topic and web sources retrieved for it.
 
 ${UNTRUSTED_SOURCES}
 
-Architect: extract 2 to 4 distinct findings about the topic. Do not repeat any finding listed as already known.
+Architect: extract only the findings the sources actually establish about the topic, at most 4.
+There is no minimum: write 1 finding if that is all the sources support, and none at all if they are off-topic.
+Every finding must directly serve the research question about its actual subject (as identified in the prompt).
+Reject generic background, filler, speculation, and anything the sources do not say.
+Never reinterpret the subject from the ordinary meaning of words in its name.
+Do not repeat any finding listed as already known.
 Titles are concise claims (at most 9 words); summaries are one plain sentence of at most 30 words.
 Critic: for each finding decide its STATUS:
 - verified: directly stated in at least one cited source
 - contested: sources disagree, or the claim is disputed
 - unverified: not clearly supported by the sources (speculation or background knowledge)
-QUOTE is an optional short verbatim sentence (6 to 25 words) copied exactly from a cited source; never a title or heading.
+QUOTE is optional: give one only when a cited source contains a sentence (6 to 25 words) that directly states the
+evidence for this finding and adds something beyond the title. Copy it exactly. Never a title, heading, or a
+restatement of the finding; leave it empty otherwise (most findings need none).
 CONTRADICTS optionally lists earlier findings in this answer that this one conflicts with (F1, F2, ...).
 If no sources were found, mark every finding unverified and use SOURCES: none.
 ${IMAGE_RULE}
@@ -276,7 +293,10 @@ export async function streamFindings({
       });
 
       // A quote only counts as evidence if it really appears in the cited page.
-      const quotedIdx = f.QUOTE ? cited.findIndex((sid) => quoteIsIn(f.QUOTE!, byId.get(sid)!)) : -1;
+      const quotedIdx =
+        f.QUOTE && !restatesClaim(f.QUOTE, `${f.TITLE} ${f.SUMMARY}`)
+          ? cited.findIndex((sid) => quoteIsIn(f.QUOTE!, byId.get(sid)!))
+          : -1;
       const quotedNode = quotedIdx >= 0 ? sourceNodeIds[quotedIdx] : null;
       if (f.QUOTE && quotedNode) {
         const evId = `${id}:evidence`;

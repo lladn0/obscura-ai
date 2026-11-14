@@ -8,10 +8,13 @@ import type { ResearchEdge, ResearchNode } from "./types";
  * they just don't define the tree.
  */
 export type Hierarchy = {
+  /** First root (kept for callers that only need one). */
   rootId: string | null;
+  /** Every independent tree: one per research question (plus detached pieces). */
+  roots: string[];
   parent: Map<string, string | null>;
   children: Map<string, string[]>;
-  /** Visual tree depth (drives layout rings/rows and default folding). */
+  /** Visual tree depth within its own tree (drives layout rings/rows and default folding). */
   depth: Map<string, number>;
   /**
    * Investigation depth: evidence and sources inherit their parent's level
@@ -21,72 +24,70 @@ export type Hierarchy = {
 };
 
 /**
+ * Explicit parent links from edge semantics, in arrival order. Research edges
+ * point child -> parent (a finding `supports` its direction, a direction
+ * `explains` the question), except `sourced_from`, where the cited source
+ * belongs under the first node that cited it. A node keeps the first parent it
+ * gets, so later cross-links (contradicts, shared sources, links between
+ * research trees) never move it or merge two trees.
+ *
  * User notes and user-drawn connections are free-floating canvas objects:
- * they never take part in the research hierarchy (layout, folding, depth).
+ * they never take part in the hierarchy.
  */
 export function buildHierarchy(
   allNodes: Pick<ResearchNode, "id" | "type">[],
   allEdges: Pick<ResearchEdge, "source" | "target" | "data">[],
 ): Hierarchy {
   const nodes = allNodes.filter((n) => n.type !== "note");
-  const edges = allEdges.filter((e) => !e.data?.manual);
+  const kind = new Map(nodes.map((n) => [n.id, n.type]));
   const parent = new Map<string, string | null>();
-  const children = new Map<string, string[]>();
+  const children = new Map<string, string[]>(nodes.map((n) => [n.id, []]));
   const depth = new Map<string, number>();
   const researchDepth = new Map<string, number>();
-  const kind = new Map(nodes.map((n) => [n.id, n.type]));
-  for (const n of nodes) children.set(n.id, []);
 
-  const adjacent = new Map<string, string[]>(nodes.map((n) => [n.id, []]));
-  for (const e of edges) {
-    if (!adjacent.has(e.source) || !adjacent.has(e.target)) continue;
-    adjacent.get(e.source)!.push(e.target);
-    adjacent.get(e.target)!.push(e.source);
+  const parentOf = new Map<string, string>();
+  const isAncestor = (a: string, of: string) => {
+    for (let p: string | undefined = of; p; p = parentOf.get(p)) if (p === a) return true;
+    return false;
+  };
+  for (const e of allEdges) {
+    if (e.data?.manual || !kind.has(e.source) || !kind.has(e.target) || e.source === e.target) continue;
+    const [child, par] = e.data?.relation === "sourced_from" ? [e.target, e.source] : [e.source, e.target];
+    // Research questions head their own tree; only follow-ups (explicitly linked) hang below one.
+    if (parentOf.has(child) || isAncestor(child, par)) continue;
+    parentOf.set(child, par);
   }
 
-  const root = nodes.find((n) => n.type === "question") ?? nodes[0];
-  if (!root) return { rootId: null, parent, children, depth, researchDepth };
+  // Roots in board order, research questions first.
+  const roots = nodes
+    .filter((n) => !parentOf.has(n.id))
+    .sort((a, b) => Number(b.type === "question") - Number(a.type === "question"))
+    .map((n) => n.id);
+  for (const [child, par] of parentOf) children.get(par)!.push(child);
 
-  const attach = (id: string, to: string | null, d: number, rd: number) => {
-    parent.set(id, to);
-    depth.set(id, d);
-    researchDepth.set(id, rd);
-    if (to) children.get(to)!.push(id);
-  };
-  const childResearchDepth = (of: string, child: string) =>
-    researchDepth.get(of)! + (consumesDepth(kind.get(child)!) ? 1 : 0);
-
-  const bfs = (start: string, attachTo: string | null, startDepth: number) => {
-    attach(start, attachTo, startDepth, attachTo ? childResearchDepth(attachTo, start) : 0);
-    // Sources are shared citations, not research steps: expand them only after
-    // every node reachable through research links has been placed, so the tree
-    // never routes an investigation through a source.
-    const queue = [start];
-    const deferred: string[] = [];
-    while (queue.length || deferred.length) {
-      const id = queue.length ? queue.shift()! : deferred.shift()!;
-      for (const next of adjacent.get(id)!) {
-        if (parent.has(next)) continue;
-        attach(next, id, depth.get(id)! + 1, childResearchDepth(id, next));
-        (kind.get(next) === "source" ? deferred : queue).push(next);
+  for (const root of roots) {
+    parent.set(root, null);
+    depth.set(root, 0);
+    researchDepth.set(root, 0);
+    const stack = [root];
+    while (stack.length) {
+      const id = stack.pop()!;
+      for (const c of children.get(id)!) {
+        parent.set(c, id);
+        depth.set(c, depth.get(id)! + 1);
+        researchDepth.set(c, researchDepth.get(id)! + (consumesDepth(kind.get(c)!) ? 1 : 0));
+        stack.push(c);
       }
     }
-  };
+  }
 
-  bfs(root.id, null, 0);
-  // Disconnected pieces (e.g. a freshly added question) hang off the root as
-  // their own branch. Questions are preferred as the branch head.
-  const rest = [...nodes].sort((a, b) => Number(b.type === "question") - Number(a.type === "question"));
-  for (const n of rest) if (!parent.has(n.id)) bfs(n.id, root.id, 1);
-
-  return { rootId: root.id, parent, children, depth, researchDepth };
+  return { rootId: roots[0] ?? null, roots, parent, children, depth, researchDepth };
 }
 
-/** Ids reachable from the root without descending into collapsed nodes. */
+/** Ids reachable from any root without descending into collapsed nodes. */
 export function visibleIds(h: Hierarchy, collapsed: ReadonlySet<string>): Set<string> {
   const visible = new Set<string>();
-  if (!h.rootId) return visible;
-  const stack = [h.rootId];
+  const stack = [...h.roots];
   while (stack.length) {
     const id = stack.pop()!;
     visible.add(id);
@@ -112,7 +113,7 @@ export function ancestors(h: Hierarchy, id: string): string[] {
   return out;
 }
 
-/** Sensible default: the question and its main branches, deeper levels folded. */
+/** Sensible default: every tree's question and its main branches, deeper levels folded. */
 export function defaultCollapsed(h: Hierarchy): string[] {
   return [...h.depth]
     .filter(([id, d]) => d === 1 && h.children.get(id)!.length > 0)

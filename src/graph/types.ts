@@ -61,6 +61,8 @@ export type QuestionData = BaseNodeData & {
   status?: "open" | "exploring" | "answered";
   /** Set on questions suggested by Research Gaps. */
   gap?: "unanswered" | "missing-evidence" | "overlooked";
+  /** Extra instructions from the user, used for later research on this question. */
+  context?: string;
 };
 
 export type Verification = "verified" | "unverified" | "contested";

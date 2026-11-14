@@ -38,10 +38,10 @@ function layoutTargets(state: BoardState, mode: LayoutMode, h: Hierarchy, visibl
     const pin = pins[id];
     targets.set(id, pin ?? { x: base.x + offset.x, y: base.y + offset.y });
     // The root moves alone; other pinned nodes carry their branch with them.
-    const next = pin && id !== h.rootId ? { x: pin.x - base.x, y: pin.y - base.y } : offset;
+    const next = pin && h.parent.get(id) ? { x: pin.x - base.x, y: pin.y - base.y } : offset;
     for (const c of h.children.get(id)!) if (visible.has(c)) walk(c, next);
   };
-  if (h.rootId) walk(h.rootId, { x: 0, y: 0 });
+  for (const root of h.roots) walk(root, { x: 0, y: 0 });
   return targets;
 }
 
@@ -128,7 +128,7 @@ export function useBoard() {
   // Notes and manual links never affect the research tree, so they don't re-flow it.
   const structureKey = [
     state.nodes.filter((n) => n.type !== "note").map((n) => `${n.id}:${n.type}`).join(","),
-    state.edges.filter((e) => !e.data?.manual).map((e) => `${e.source}>${e.target}`).join(","),
+    state.edges.filter((e) => !e.data?.manual).map((e) => `${e.source}>${e.target}:${e.data?.relation}`).join(","),
   ].join("|");
   const hierarchy = useMemo(
     () => buildHierarchy(state.nodes, state.edges),
@@ -194,7 +194,7 @@ export function useBoard() {
           if (!shown.has(id) && parent && !s.pinned[m][id]) from.set(id, from.get(parent)!);
           for (const c of h.children.get(id)!) if (vis.has(c)) walk(c);
         };
-        if (h.rootId) walk(h.rootId);
+        for (const root of h.roots) walk(root);
       }
       shownRef.current = vis;
 

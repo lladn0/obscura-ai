@@ -18,6 +18,7 @@ import {
   PanelRightOpen,
   Rabbit,
   RotateCcw,
+  Square,
   Sun,
 } from "lucide-react";
 
@@ -106,7 +107,9 @@ function WorkspaceInner() {
       if (d.imageStatus !== "pending" && d.imageStatus !== "loading") continue;
       imageJobs.current.add(n.id);
       dispatch({ type: "setImage", nodeId: n.id, data: { imageStatus: "loading" } });
-      void findImage(d.imageQuery)
+      // Never reuse a picture another node already shows.
+      const used = new Set(state.nodes.map((m) => m.data.imageUrl).filter((u): u is string => !!u));
+      void findImage(d.imageQuery, used)
         .catch(() => null)
         .then((found) =>
           dispatch({
@@ -123,6 +126,43 @@ function WorkspaceInner() {
    * request carries just enough context: the node, its path to the root, its
    * existing children, the branch (for gaps) and already-known source URLs.
    */
+  /** User guidance on a node and its ancestors, root first. */
+  const guidanceFor = (nodeId: string) =>
+    [...ancestors(hierarchy, nodeId).reverse(), nodeId]
+      .map((id) => state.nodes.find((n) => n.id === id))
+      .map((n) => (n?.type === "question" ? n.data.context?.trim() : undefined))
+      .filter((c): c is string => !!c);
+
+  const knownSourcesOf = () => {
+    const known: Record<string, string> = {};
+    for (const n of state.nodes) if (n.type === "source" && n.data.url) known[n.data.url] = n.id;
+    return known;
+  };
+
+  /** A new question under an existing one, researched on its own (parent context only). */
+  const askFollowUp = (parentId: string, question: string) => {
+    const parent = state.nodes.find((n) => n.id === parentId);
+    if (!parent || !question.trim()) return;
+    const label = (id: string) => state.nodes.find((n) => n.id === id)?.data.label ?? "";
+    const request: ActionRequest = {
+      kind: "followUp",
+      actionId: `followUp-${crypto.randomUUID().slice(0, 8)}`,
+      target: {
+        id: `fq-${crypto.randomUUID().slice(0, 8)}`,
+        kind: "question",
+        label: question.trim(),
+        path: [...ancestors(hierarchy, parentId).reverse().map(label), parent.data.label],
+        children: [],
+        parentId,
+        context: guidanceFor(parentId),
+      },
+      knownSources: knownSourcesOf(),
+    };
+    if (collapsed.has(parentId)) dispatch({ type: "toggleCollapse", nodeId: parentId });
+    dispatch({ type: "log", message: `Follow-up asked: “${question.trim()}”` });
+    void agent.runAction(parent.data.researchId ?? "board", request);
+  };
+
   const runNodeAction = (nodeId: string, kind: NodeAction) => {
     const node = state.nodes.find((n) => n.id === nodeId);
     if (!node) return;
@@ -132,8 +172,7 @@ function WorkspaceInner() {
       const n = byId.get(id);
       return n?.type === "claim" ? n.data.verification : undefined;
     };
-    const knownSources: Record<string, string> = {};
-    for (const n of state.nodes) if (n.type === "source" && n.data.url) knownSources[n.data.url] = n.id;
+    const knownSources = knownSourcesOf();
 
     const request: ActionRequest = {
       kind,
@@ -153,6 +192,7 @@ function WorkspaceInner() {
                 .filter((n) => n.type !== "source")
                 .map((n) => ({ label: n.data.label, kind: n.type, verification: verificationOf(n.id) }))
             : undefined,
+        context: guidanceFor(node.id),
       },
       knownSources,
     };
@@ -252,6 +292,16 @@ function WorkspaceInner() {
   }, [selected, selectedEdge, connectMode, board, dispatch, openResearchInput, setFocusMode, setSidebarOpen]);
 
   const toggleBranch = (id: string) => dispatch({ type: "toggleCollapse", nodeId: id });
+
+  /**
+   * Clearing the board never silently stops research: runs in progress keep
+   * streaming, and everything they produced so far is restored onto the new board.
+   */
+  const resetBoard = () => {
+    if (!agent.anyActive) return board.resetDemo();
+    board.newBoard(agent.research?.question ?? "Untitled research");
+    dispatch({ type: "stream", ops: agent.activeOps() });
+  };
   const folded = state.collapsed.length > 0;
 
   return (
@@ -287,6 +337,17 @@ function WorkspaceInner() {
         <div className="flex items-center gap-2">
           <LayoutSwitch mode={mode} onChange={setMode} />
           <AgentStatus research={agent.research} running={agent.running} error={agent.error} />
+          {agent.anyActive && (
+            <Button
+              variant="ghost"
+              size="xs"
+              className="text-muted-foreground hover:text-rose-300"
+              title="Stop all research in progress"
+              onClick={agent.cancel}
+            >
+              <Square className="size-3" /> Cancel
+            </Button>
+          )}
           <CostIndicator usage={agent.usage} />
         </div>
 
@@ -318,7 +379,9 @@ function WorkspaceInner() {
                     {folded ? "Expand all branches" : "Collapse to main branches"}
                   </MenuItem>
                   <Menu.Separator className="my-1 h-px bg-white/[0.08]" />
-                  <MenuItem icon={RotateCcw} onClick={board.resetDemo}>Reset demo board</MenuItem>
+                  <MenuItem icon={RotateCcw} onClick={resetBoard}>
+                    {agent.anyActive ? "Clear board (keeps active research)" : "Reset demo board"}
+                  </MenuItem>
                 </Menu.Popup>
               </Menu.Positioner>
             </Menu.Portal>
@@ -405,6 +468,9 @@ function WorkspaceInner() {
                 active: agent.active.get(selected.id),
                 note: agent.notes[selected.id],
                 onRun: (kind) => runNodeAction(selected.id, kind),
+                onFollowUp: (q) => askFollowUp(selected.id, q),
+                onSetContext: (context) =>
+                  board.commit({ type: "editNode", nodeId: selected.id, edit: { context: context || undefined } }),
               }}
               onCollapsePanel={() => setDetailsOpen(false)}
               onClose={() => dispatch({ type: "select", nodeId: null })}

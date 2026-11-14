@@ -61,7 +61,7 @@ export type GraphEventPayload =
 export const USAGE_EVENT = "research.usage";
 
 /** User-initiated investigations of one node. */
-export type NodeAction = "deepDive" | "challenge" | "findEvidence" | "gaps";
+export type NodeAction = "deepDive" | "challenge" | "findEvidence" | "gaps" | "followUp";
 
 /** Compact context about the node being investigated (the server keeps no board state). */
 export type ActionTarget = {
@@ -76,6 +76,10 @@ export type ActionTarget = {
   children: string[];
   /** For gap analysis: the selected branch's nodes with their status. */
   branch?: { label: string; kind: NodeKind; verification?: Verification }[];
+  /** User guidance attached to this node and its ancestors ("focus on the Lithuanian event"). */
+  context?: string[];
+  /** Follow-up questions: the existing question the new one is asked under. */
+  parentId?: string;
 };
 
 export type ActionRequest = {

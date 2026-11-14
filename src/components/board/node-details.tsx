@@ -8,8 +8,10 @@ import {
   UnfoldVertical,
   Crosshair,
   PanelRightClose,
+  MessageSquarePlus,
   PenLine,
   PinOff,
+  SlidersHorizontal,
   Trash2,
   X,
 } from "lucide-react";
@@ -108,6 +110,87 @@ function KindFields({ node }: { node: ResearchNode }) {
   }
 }
 
+/** Follow-up questions and extra context for a research question. */
+function QuestionTools({
+  context,
+  onFollowUp,
+  onSetContext,
+}: {
+  context: string;
+  onFollowUp: (question: string) => void;
+  onSetContext: (context: string) => void;
+}) {
+  const [mode, setMode] = useState<"none" | "followUp" | "context">("none");
+  const [text, setText] = useState("");
+  const open = (m: "followUp" | "context") => {
+    setMode(m);
+    setText(m === "context" ? context : "");
+  };
+  const submit = () => {
+    if (mode === "followUp" && text.trim()) onFollowUp(text.trim());
+    if (mode === "context") onSetContext(text.trim());
+    setMode("none");
+    setText("");
+  };
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap gap-1.5">
+        <Button variant={mode === "followUp" ? "secondary" : "outline"} size="xs" onClick={() => open("followUp")}>
+          <MessageSquarePlus /> Ask Follow-Up
+        </Button>
+        <Button
+          variant={mode === "context" ? "secondary" : "outline"}
+          size="xs"
+          onClick={() => open("context")}
+          title="Extra instructions used for later research on this question"
+        >
+          <SlidersHorizontal /> {context ? "Edit context" : "Add context"}
+        </Button>
+      </div>
+      {context && mode !== "context" && (
+        <p className="rounded-md border border-white/[0.06] bg-white/[0.02] px-2 py-1.5 text-xs text-muted-foreground">
+          <span className="text-foreground/80">Context:</span> {context}
+        </p>
+      )}
+      {mode !== "none" && (
+        <div className="space-y-1.5">
+          <textarea
+            autoFocus
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                submit();
+              } else if (e.key === "Escape") setMode("none");
+            }}
+            rows={2}
+            placeholder={
+              mode === "followUp"
+                ? "e.g. How did European banks contribute?"
+                : "e.g. Focus on the Lithuanian hackathon event, not the word “unfair”."
+            }
+            className="w-full resize-none rounded-md border border-white/15 bg-background/60 px-2 py-1.5 text-xs leading-relaxed outline-none focus:border-white/30"
+          />
+          <div className="flex gap-1.5">
+            <Button size="xs" onClick={submit} disabled={mode === "followUp" && !text.trim()}>
+              {mode === "followUp" ? "Research follow-up" : "Save context"}
+            </Button>
+            <Button variant="ghost" size="xs" onClick={() => setMode("none")}>
+              Cancel
+            </Button>
+          </div>
+          {mode === "context" && (
+            <p className="text-[10px] text-muted-foreground">
+              Used for Deep Dives, follow-ups and other research on this question. Existing findings are kept.
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export type BranchInfo = { children: number; collapsed: boolean; hidden: number; descendants?: number };
 const descendantCount = (b: BranchInfo) => b.descendants ?? b.children;
 
@@ -134,7 +217,13 @@ export function NodeDetails({
   branch: BranchInfo;
   researchDepth: number;
   pinned: boolean;
-  investigate: { active?: NodeAction; note?: ActionNote; onRun: (action: NodeAction) => void };
+  investigate: {
+    active?: NodeAction;
+    note?: ActionNote;
+    onRun: (action: NodeAction) => void;
+    onFollowUp: (question: string) => void;
+    onSetContext: (context: string) => void;
+  };
   onSelect: (id: string) => void;
   onCenter: () => void;
   onToggleBranch: () => void;
@@ -249,6 +338,14 @@ export function NodeDetails({
         </div>
 
         <InvestigateActions node={node} active={investigate.active} note={investigate.note} onRun={investigate.onRun} />
+
+        {node.type === "question" && (
+          <QuestionTools
+            context={node.data.context ?? ""}
+            onFollowUp={investigate.onFollowUp}
+            onSetContext={investigate.onSetContext}
+          />
+        )}
 
         <EvidenceTrail node={node} nodes={nodes} edges={edges} onSelect={onSelect} />
 

@@ -46,9 +46,28 @@ export function computeLayout(
 ): Map<string, XYPosition> {
   const sizes = new Map<string, Size>();
   for (const n of nodes) if (visible.has(n.id)) sizes.set(n.id, sizeOf(n));
-  if (!h.rootId || !sizes.size) return new Map();
-  return mode === "sun" ? sunLayout(h, sizes) : treeLayout(h, sizes);
+  if (!h.roots.length || !sizes.size) return new Map();
+  // Each research tree is laid out on its own, then trees sit side by side;
+  // the first tree keeps its place so new research never shifts it.
+  const all = new Map<string, XYPosition>();
+  let right = -Infinity;
+  for (const root of h.roots) {
+    if (!sizes.has(root)) continue;
+    const tree = mode === "sun" ? sunLayout(h, sizes, root) : treeLayout(h, sizes, root);
+    let minX = Infinity;
+    let maxX = -Infinity;
+    for (const [id, p] of tree) {
+      minX = Math.min(minX, p.x);
+      maxX = Math.max(maxX, p.x + sizes.get(id)!.width);
+    }
+    const dx = right === -Infinity ? 0 : right + TREE_GAP - minX;
+    for (const [id, p] of tree) all.set(id, { x: p.x + dx, y: p.y });
+    right = maxX + dx;
+  }
+  return all;
 }
+
+const TREE_GAP = 160;
 
 // --- Tree: compact top-to-bottom hierarchy -----------------------------------
 
@@ -65,7 +84,7 @@ type SubtreeBox = { w: number; h: number; stacked: boolean };
  * whose visible children are all leaves stacks them vertically. Research
  * branches end in many leaf findings, so this keeps the board narrow.
  */
-function treeLayout(h: Hierarchy, sizes: Map<string, Size>): Map<string, XYPosition> {
+function treeLayout(h: Hierarchy, sizes: Map<string, Size>, root: string): Map<string, XYPosition> {
   const kids = (id: string) => h.children.get(id)!.filter((c) => sizes.has(c));
   const boxes = new Map<string, SubtreeBox>();
 
@@ -111,7 +130,6 @@ function treeLayout(h: Hierarchy, sizes: Map<string, Size>): Map<string, XYPosit
     }
   };
 
-  const root = h.rootId!;
   const rootBox = measure(root);
   place(root, -rootBox.w / 2, 0);
   return positions;
@@ -134,8 +152,7 @@ const overlaps = (a: Rect, b: Rect) =>
  * Rings are then placed card by card, each at the smallest radius (beyond its
  * parent) where it clears every card already placed.
  */
-function sunLayout(h: Hierarchy, sizes: Map<string, Size>): Map<string, XYPosition> {
-  const root = h.rootId!;
+function sunLayout(h: Hierarchy, sizes: Map<string, Size>, root: string): Map<string, XYPosition> {
   const kids = (id: string) => h.children.get(id)!.filter((c) => sizes.has(c));
 
   const weight = new Map<string, number>();
