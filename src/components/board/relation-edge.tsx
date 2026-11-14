@@ -15,6 +15,7 @@ import {
 import { cn } from "@/lib/utils";
 
 import { EDGE_RELATIONS, type ResearchEdgeData } from "@/graph/types";
+import { STACK_INDENT } from "@/graph/layout";
 import { useBoardView } from "./board-context";
 import { RELATION_STYLES } from "./styles";
 
@@ -86,6 +87,23 @@ function crossLinkPath(source: InternalNode, target: InternalNode, mode: "sun" |
   return [`M ${a.x} ${a.y} Q ${cx} ${cy}, ${b.x} ${b.y}`, 0.25 * a.x + 0.5 * cx + 0.25 * b.x, 0.25 * a.y + 0.5 * cy + 0.25 * b.y];
 }
 
+/**
+ * Tree mode, leaf children stacked in an indented column under their parent:
+ * run down a spine on the parent's left edge, then across into the child, so
+ * the line never crosses the siblings above it.
+ */
+function stackedPath(parent: InternalNode, child: InternalNode, parentIsSource: boolean): [string, number, number] | null {
+  const p = box(parent);
+  const c = box(child);
+  const indent = c.x - p.x;
+  if (indent < STACK_INDENT / 2 || indent > STACK_INDENT * 1.6 || c.y < p.y + p.h) return null;
+  const spine = p.x + indent / 2;
+  const r = Math.min(8, indent / 2);
+  const down = `M ${spine} ${p.y + p.h} L ${spine} ${c.cy - r} Q ${spine} ${c.cy}, ${spine + r} ${c.cy} L ${c.x} ${c.cy}`;
+  const up = `M ${c.x} ${c.cy} L ${spine + r} ${c.cy} Q ${spine} ${c.cy}, ${spine} ${c.cy - r} L ${spine} ${p.y + p.h}`;
+  return [parentIsSource ? down : up, spine + (c.x - spine) / 2, c.cy];
+}
+
 /** Tree mode: leave from the bottom/top when the cards are on different levels, else from the sides. */
 function treeParams(source: InternalNode, target: InternalNode) {
   const s = box(source);
@@ -128,8 +146,14 @@ export const RelationEdge = memo(function RelationEdge({
   if (!sourceNode || !targetNode || !data) return null;
 
   const style = RELATION_STYLES[data.relation];
-  const isTreeEdge = hierarchy.parent.get(target) === source || hierarchy.parent.get(source) === target;
+  const parentIsSource = hierarchy.parent.get(target) === source;
+  const isTreeEdge = parentIsSource || hierarchy.parent.get(source) === target;
   const [path, labelX, labelY] =
+    (isTreeEdge &&
+      mode === "tree" &&
+      (parentIsSource
+        ? stackedPath(sourceNode, targetNode, true)
+        : stackedPath(targetNode, sourceNode, false))) ||
     (!isTreeEdge && crossLinkPath(sourceNode, targetNode, mode)) ||
     (mode === "sun"
       ? radialPath(sourceNode, targetNode)

@@ -54,5 +54,8 @@ export type GraphEventPayload =
   | { name: typeof GraphEvent.NodeCompleted; value: NodeCompleted }
   | { name: typeof GraphEvent.EdgeCreated; value: EdgeCreated };
 
+/** CUSTOM event carrying per-request cost accounting (ResearchUsage in graph.ts). */
+export const USAGE_EVENT = "research.usage";
+
 /** Input forwarded from the client with each run. */
 export type ResearchRunProps = { question: string; researchId: string };

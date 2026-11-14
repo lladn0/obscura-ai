@@ -7,6 +7,7 @@ import type { BoardAction, StreamOp } from "@/graph/board-state";
 import {
   GraphEvent,
   RESEARCH_AGENT_ID,
+  USAGE_EVENT,
   type EdgeCreated,
   type NodeCompleted,
   type NodeCreated,
@@ -14,6 +15,10 @@ import {
   type ResearchRunProps,
   type ResearchState,
 } from "./protocol";
+import type { ResearchUsage } from "./graph";
+
+export type UsageTotals = { llmCostUsd: number; llmRequests: number; inputTokens: number; outputTokens: number; firecrawlCredits: number };
+const NO_USAGE: UsageTotals = { llmCostUsd: 0, llmRequests: 0, inputTokens: 0, outputTokens: 0, firecrawlCredits: 0 };
 
 /**
  * Connects the board to the research agent over AG-UI (via CopilotKit).
@@ -26,6 +31,7 @@ export function useResearchAgent(dispatch: Dispatch<BoardAction>) {
   const [research, setResearch] = useState<ResearchState | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [usage, setUsage] = useState<UsageTotals>(NO_USAGE);
 
   const queue = useRef<StreamOp[]>([]);
   const frame = useRef<number | null>(null);
@@ -77,6 +83,21 @@ export function useResearchAgent(dispatch: Dispatch<BoardAction>) {
             enqueue({ op: "done", nodeId: v.nodeId, data: v.data });
             break;
           }
+          case USAGE_EVENT: {
+            const u = event.value as ResearchUsage;
+            setUsage((t) =>
+              u.kind === "llm"
+                ? {
+                    ...t,
+                    llmCostUsd: t.llmCostUsd + u.costUsd,
+                    llmRequests: t.llmRequests + 1,
+                    inputTokens: t.inputTokens + u.input + u.cacheRead + u.cacheWrite,
+                    outputTokens: t.outputTokens + u.output,
+                  }
+                : { ...t, firecrawlCredits: t.firecrawlCredits + u.credits },
+            );
+            break;
+          }
           case GraphEvent.EdgeCreated: {
             const v = event.value as EdgeCreated;
             enqueue({ op: "edge", edgeId: v.edgeId, source: v.source, target: v.target, relation: v.relation });
@@ -102,6 +123,7 @@ export function useResearchAgent(dispatch: Dispatch<BoardAction>) {
   const startResearch = useCallback(
     async (props: ResearchRunProps) => {
       setError(null);
+      setUsage(NO_USAGE);
       setRunning(true);
       lastSeq.current.clear();
       branchStatus.current.clear();
@@ -122,5 +144,5 @@ export function useResearchAgent(dispatch: Dispatch<BoardAction>) {
 
   useEffect(() => () => void (frame.current && cancelAnimationFrame(frame.current)), []);
 
-  return { research, running, error, startResearch };
+  return { research, running, error, usage, startResearch };
 }

@@ -29,7 +29,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { BoardCanvas } from "./board-canvas";
-import { AgentStatus } from "./agent-status";
+import { AgentStatus, CostIndicator } from "./agent-status";
 import { NodeDetails } from "./node-details";
 import { ResearchSidebar } from "./research-sidebar";
 import { usePersistentState } from "./use-persistent-state";
@@ -200,6 +200,7 @@ function WorkspaceInner() {
         <div className="flex items-center gap-2">
           <LayoutSwitch mode={mode} onChange={setMode} />
           <AgentStatus research={agent.research} running={agent.running} error={agent.error} />
+          <CostIndicator usage={agent.usage} />
         </div>
 
         <div className="flex items-center justify-end gap-1">

@@ -3,8 +3,9 @@ import { EventType, type BaseEvent, type RunAgentInput } from "@ag-ui/core";
 import { Observable } from "rxjs";
 
 import { researchGraph, type ResearchChunk } from "./graph";
-import type { ResearchRunProps, ResearchState } from "./protocol";
+import { USAGE_EVENT, type ResearchRunProps, type ResearchState } from "./protocol";
 import { BranchScheduler } from "./scheduler";
+import { createSearch } from "./search";
 
 /**
  * AG-UI agent that runs the LangGraph research workflow in-process and
@@ -27,6 +28,7 @@ export class ResearchAgent extends AbstractAgent {
         if (step) emit({ type: EventType.STEP_STARTED, stepName: step } as BaseEvent);
       };
 
+      const totals = { llmCost: 0, llmRequests: 0, credits: 0 };
       const toEvents = (chunk: ResearchChunk) => {
         switch (chunk.type) {
           case "graph":
@@ -36,6 +38,15 @@ export class ResearchAgent extends AbstractAgent {
             emit({ type: EventType.STATE_DELTA, delta: [{ op: "replace", path: "/phase", value: chunk.phase }] } as BaseEvent);
             enterStep(chunk.phase === "completed" ? null : chunk.phase);
             return;
+          case "usage": {
+            const u = chunk.usage;
+            if (u.kind === "llm") {
+              totals.llmCost += u.costUsd;
+              totals.llmRequests++;
+            } else totals.credits += u.credits;
+            emit({ type: EventType.CUSTOM, name: USAGE_EVENT, value: u } as BaseEvent);
+            return;
+          }
           case "branch":
             emit({
               type: EventType.STATE_DELTA,
@@ -55,12 +66,16 @@ export class ResearchAgent extends AbstractAgent {
           {
             streamMode: "custom",
             signal: abort.signal,
-            configurable: { scheduler: new BranchScheduler(), sourceNodes: new Set<string>() },
+            configurable: { scheduler: new BranchScheduler(), sourceNodes: new Set<string>(), search: createSearch() },
           },
         );
         for await (const chunk of stream) toEvents(chunk as ResearchChunk);
 
         enterStep(null);
+        console.info(
+          `[research] ${researchId}: ${totals.llmRequests} LLM requests ~$${totals.llmCost.toFixed(4)}, ` +
+            `Firecrawl ~${totals.credits} credits`,
+        );
         emit({ type: EventType.RUN_FINISHED, threadId, runId } as BaseEvent);
         subscriber.complete();
       })().catch((error: unknown) => {

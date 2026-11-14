@@ -1,4 +1,3 @@
-import dagre from "@dagrejs/dagre";
 import type { XYPosition } from "@xyflow/react";
 
 import type { Hierarchy } from "./hierarchy";
@@ -8,11 +7,11 @@ export const LAYOUT_MODES = ["sun", "tree"] as const;
 export type LayoutMode = (typeof LAYOUT_MODES)[number];
 
 export const NODE_WIDTH: Record<NodeKind, number> = {
-  question: 260,
-  claim: 230,
-  evidence: 230,
-  source: 210,
-  insight: 240,
+  question: 240,
+  claim: 210,
+  evidence: 210,
+  source: 190,
+  insight: 230,
 };
 
 /** Used before React Flow has measured a node. */
@@ -49,49 +48,89 @@ export function computeLayout(
   return mode === "sun" ? sunLayout(h, sizes) : treeLayout(h, sizes);
 }
 
-// --- Tree: top-to-bottom hierarchy (dagre) ---------------------------------
+// --- Tree: compact top-to-bottom hierarchy -----------------------------------
 
+const H_GAP = 28;
+const V_GAP = 64;
+/** Leaf children stack in an indented column under their parent (like a file tree). */
+export const STACK_INDENT = 28;
+const STACK_GAP = 14;
+
+type SubtreeBox = { w: number; h: number; stacked: boolean };
+
+/**
+ * Tidy tree: a node's subtrees sit side by side under it, except that a node
+ * whose visible children are all leaves stacks them vertically. Research
+ * branches end in many leaf findings, so this keeps the board narrow.
+ */
 function treeLayout(h: Hierarchy, sizes: Map<string, Size>): Map<string, XYPosition> {
-  const g = new dagre.graphlib.Graph();
-  g.setGraph({ rankdir: "TB", nodesep: 28, ranksep: 72, marginx: 0, marginy: 0 });
-  g.setDefaultEdgeLabel(() => ({}));
-  for (const [id, size] of sizes) g.setNode(id, size);
-  // Only tree edges drive the layout, so siblings stay grouped under their parent.
-  for (const id of sizes.keys()) {
-    const parent = h.parent.get(id);
-    if (parent && sizes.has(parent)) g.setEdge(parent, id);
-  }
-  dagre.layout(g);
+  const kids = (id: string) => h.children.get(id)!.filter((c) => sizes.has(c));
+  const boxes = new Map<string, SubtreeBox>();
+
+  const measure = (id: string): SubtreeBox => {
+    const own = sizes.get(id)!;
+    const children = kids(id);
+    let box: SubtreeBox;
+    if (!children.length) box = { w: own.width, h: own.height, stacked: false };
+    else if (children.every((c) => !kids(c).length)) {
+      const heights = children.reduce((sum, c) => sum + sizes.get(c)!.height + STACK_GAP, 0);
+      const widest = Math.max(...children.map((c) => sizes.get(c)!.width));
+      box = { w: Math.max(own.width, STACK_INDENT + widest), h: own.height + STACK_GAP + heights, stacked: true };
+    } else {
+      const subs = children.map(measure);
+      const row = subs.reduce((sum, s) => sum + s.w, 0) + H_GAP * (subs.length - 1);
+      box = { w: Math.max(own.width, row), h: own.height + V_GAP + Math.max(...subs.map((s) => s.h)), stacked: false };
+    }
+    boxes.set(id, box);
+    return box;
+  };
 
   const positions = new Map<string, XYPosition>();
-  for (const [id, { width, height }] of sizes) {
-    const { x, y } = g.node(id);
-    positions.set(id, { x: x - width / 2, y: y - height / 2 });
-  }
+  const place = (id: string, left: number, top: number) => {
+    const own = sizes.get(id)!;
+    const box = boxes.get(id)!;
+    const children = kids(id);
+    if (box.stacked) {
+      positions.set(id, { x: left, y: top });
+      let y = top + own.height + STACK_GAP;
+      for (const c of children) {
+        positions.set(c, { x: left + STACK_INDENT, y });
+        y += sizes.get(c)!.height + STACK_GAP;
+      }
+      return;
+    }
+    positions.set(id, { x: left + (box.w - own.width) / 2, y: top });
+    if (!children.length) return;
+    const row = children.reduce((sum, c) => sum + boxes.get(c)!.w, 0) + H_GAP * (children.length - 1);
+    let x = left + (box.w - row) / 2;
+    for (const c of children) {
+      place(c, x, top + own.height + V_GAP);
+      x += boxes.get(c)!.w + H_GAP;
+    }
+  };
+
+  const root = h.rootId!;
+  const rootBox = measure(root);
+  place(root, -rootBox.w / 2, 0);
   return positions;
 }
 
 // --- Sun: radial tree -------------------------------------------------------
 
-const GAP_X = 28;
-const GAP_Y = 22;
-const MIN_FIRST_RING = 280;
-const EDGE_ROOM = 70;
+const GAP_X = 20;
+const GAP_Y = 16;
+const MIN_FIRST_RING = 240;
+const RING_STEP = 150;
 
-/** Centre distance two cards need along unit direction (ux, uy) to not overlap. */
-function clearance(a: Size, b: Size, ux: number, uy: number) {
-  const w = (a.width + b.width) / 2 + GAP_X;
-  const hgt = (a.height + b.height) / 2 + GAP_Y;
-  const ax = Math.abs(ux);
-  const ay = Math.abs(uy);
-  return Math.min(ax > 1e-6 ? w / ax : Infinity, ay > 1e-6 ? hgt / ay : Infinity);
-}
+type Rect = { x: number; y: number; w: number; h: number };
+const overlaps = (a: Rect, b: Rect) =>
+  a.x < b.x + b.w + GAP_X && b.x < a.x + a.w + GAP_X && a.y < b.y + b.h + GAP_Y && b.y < a.y + a.h + GAP_Y;
 
 /**
  * Each node gets an angular wedge proportional to its number of visible
  * leaves, nested inside its parent's wedge, so branches never interleave.
- * Ring radii then grow just enough that neighbouring cards on a ring, and
- * cards on consecutive rings, clear each other.
+ * Rings are then placed card by card, each at the smallest radius (beyond its
+ * parent) where it clears every card already placed.
  */
 function sunLayout(h: Hierarchy, sizes: Map<string, Size>): Map<string, XYPosition> {
   const root = h.rootId!;
@@ -123,56 +162,38 @@ function sunLayout(h: Hierarchy, sizes: Map<string, Size>): Map<string, XYPositi
   const offset = first ? (Math.PI * weight.get(first)!) / weight.get(root)! : 0;
   assign(root, -Math.PI / 2 - offset, (3 * Math.PI) / 2 - offset, 0);
 
-  const radius = new Map<number, number>([[0, 0]]);
   const rootSize = sizes.get(root)!;
+  const positions = new Map<string, XYPosition>([[root, { x: -rootSize.width / 2, y: -rootSize.height / 2 }]]);
+  const placed: Rect[] = [{ x: -rootSize.width / 2, y: -rootSize.height / 2, w: rootSize.width, h: rootSize.height }];
+
+  // Each card moves outward only as far as it must to clear everything already
+  // placed: crowded sectors grow, sparse ones stay close to the centre.
+  let prevInner = 0;
   for (let d = 1; d < rings.length; d++) {
-    const ring = rings[d] ?? [];
-    let r = d === 1 ? MIN_FIRST_RING : 0;
-
-    // Clear the previous ring (or the root card) along each node's own ray.
+    const ring = [...(rings[d] ?? [])].sort((a, b) => angle.get(a)! - angle.get(b)!);
+    let ringMin = Infinity;
     for (const id of ring) {
+      const { width, height } = sizes.get(id)!;
       const a = angle.get(id)!;
-      const ux = Math.cos(a);
-      const uy = Math.sin(a);
-      const inner = d === 1 ? rootSize : maxSize(rings[d - 1], sizes);
-      r = Math.max(r, radius.get(d - 1)! + clearance(inner, sizes.get(id)!, ux, uy) + EDGE_ROOM);
+      const parent = h.parent.get(id)!;
+      const pp = positions.get(parent)!;
+      const ps = sizes.get(parent)!;
+      // Start just beyond the parent (and the previous ring's inner edge).
+      const parentR = Math.hypot(pp.x + ps.width / 2, pp.y + ps.height / 2);
+      let r = Math.max(d === 1 ? MIN_FIRST_RING : 0, parentR + RING_STEP, prevInner + RING_STEP);
+      const rectAt = (radius: number): Rect => ({
+        x: radius * Math.cos(a) - width / 2,
+        y: radius * Math.sin(a) - height / 2,
+        w: width,
+        h: height,
+      });
+      let rect = rectAt(r);
+      for (let i = 0; i < 200 && placed.some((b) => overlaps(rect, b)); i++) rect = rectAt((r += 10));
+      positions.set(id, { x: rect.x, y: rect.y });
+      placed.push(rect);
+      ringMin = Math.min(ringMin, r);
     }
-
-    // Neighbours on the same ring must not overlap (chord between them).
-    const sorted = [...ring].sort((a, b) => angle.get(a)! - angle.get(b)!);
-    for (let i = 0; i < sorted.length && sorted.length > 1; i++) {
-      const a = sorted[i];
-      const b = sorted[(i + 1) % sorted.length];
-      let gap = angle.get(b)! - angle.get(a)!;
-      if (gap <= 0) gap += 2 * Math.PI;
-      if (gap >= Math.PI) continue;
-      const mid = angle.get(a)! + gap / 2;
-      // Chord direction is tangential at the midpoint.
-      const need = clearance(sizes.get(a)!, sizes.get(b)!, -Math.sin(mid), Math.cos(mid));
-      r = Math.max(r, need / (2 * Math.sin(gap / 2)));
-    }
-    radius.set(d, r);
+    prevInner = ringMin;
   }
-
-  const positions = new Map<string, XYPosition>();
-  const place = (id: string, depth: number) => {
-    const { width, height } = sizes.get(id)!;
-    const r = radius.get(depth)!;
-    const a = angle.get(id)!;
-    positions.set(id, { x: r * Math.cos(a) - width / 2, y: r * Math.sin(a) - height / 2 });
-    for (const c of kids(id)) place(c, depth + 1);
-  };
-  place(root, 0);
   return positions;
-}
-
-function maxSize(ids: string[] | undefined, sizes: Map<string, Size>): Size {
-  let width = 0;
-  let height = 0;
-  for (const id of ids ?? []) {
-    const s = sizes.get(id)!;
-    width = Math.max(width, s.width);
-    height = Math.max(height, s.height);
-  }
-  return { width, height };
 }
