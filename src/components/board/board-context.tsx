@@ -2,6 +2,7 @@
 
 import { createContext, useContext } from "react";
 
+import type { NodeEdit } from "@/graph/board-state";
 import type { Hierarchy } from "@/graph/hierarchy";
 import type { LayoutMode } from "@/graph/layout";
 
@@ -12,6 +13,10 @@ export type BoardView = {
   toggleCollapse: (id: string) => void;
   /** Nodes with a user action (Deep Dive, Challenge, ...) in flight. */
   busy: ReadonlySet<string>;
+  /** Node whose title/description is being edited in place. */
+  editingId: string | null;
+  setEditing: (id: string | null) => void;
+  saveEdit: (id: string, edit: NodeEdit) => void;
 };
 
 export const BoardViewContext = createContext<BoardView | null>(null);

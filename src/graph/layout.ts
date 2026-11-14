@@ -12,6 +12,7 @@ export const NODE_WIDTH: Record<NodeKind, number> = {
   evidence: 210,
   source: 190,
   insight: 230,
+  note: 220,
 };
 
 /** Used before React Flow has measured a node. */
@@ -21,11 +22,12 @@ const ESTIMATED_HEIGHT: Record<NodeKind, number> = {
   evidence: 84,
   source: 84,
   insight: 96,
+  note: 80,
 };
 
 type Size = { width: number; height: number };
 
-function sizeOf(node: ResearchNode): Size {
+export function sizeOf(node: ResearchNode): Size {
   return {
     width: node.measured?.width ?? NODE_WIDTH[node.type],
     height: node.measured?.height ?? ESTIMATED_HEIGHT[node.type],

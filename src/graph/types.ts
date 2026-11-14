@@ -12,6 +12,7 @@ export const NODE_KINDS = [
   "evidence",
   "source",
   "insight",
+  "note",
 ] as const;
 export type NodeKind = (typeof NODE_KINDS)[number];
 
@@ -37,7 +38,24 @@ type BaseNodeData = {
   generating?: boolean;
   researchId?: string;
   branchId?: string;
+  /** The user edited label/description: later AI updates must not overwrite them. */
+  userEdited?: boolean;
+  /** Optional contextual image (chosen by the AI, retrieved from Wikimedia Commons). */
+  imageNeeded?: boolean;
+  imageQuery?: string;
+  imageUrl?: string;
+  imageAlt?: string;
+  /** Page of the image on its host (attribution + licence). */
+  imageSourceUrl?: string;
+  imageCredit?: string;
+  imageStatus?: "pending" | "loading" | "ready" | "none";
 };
+
+/** Image fields shared by every node kind. */
+export type ImageFields = Pick<
+  BaseNodeData,
+  "imageNeeded" | "imageQuery" | "imageUrl" | "imageAlt" | "imageSourceUrl" | "imageCredit" | "imageStatus"
+>;
 
 export type QuestionData = BaseNodeData & {
   status?: "open" | "exploring" | "answered";
@@ -74,23 +92,30 @@ export type InsightData = BaseNodeData & {
   confidence?: Confidence;
 };
 
+/** A user-created sticky note: free-floating, outside the research hierarchy. */
+export type NoteData = BaseNodeData;
+
 export type QuestionNode = Node<QuestionData, "question">;
 export type ClaimNode = Node<ClaimData, "claim">;
 export type EvidenceNode = Node<EvidenceData, "evidence">;
 export type SourceNode = Node<SourceData, "source">;
 export type InsightNode = Node<InsightData, "insight">;
+export type NoteNode = Node<NoteData, "note">;
 
 export type ResearchNode =
   | QuestionNode
   | ClaimNode
   | EvidenceNode
   | SourceNode
-  | InsightNode;
+  | InsightNode
+  | NoteNode;
 
 export type ResearchEdgeData = {
   relation: EdgeRelation;
   label?: string;
   strength?: Confidence;
+  /** Drawn by the user: a visual link only, never part of the research hierarchy. */
+  manual?: boolean;
 };
 
 /** All research edges render through the single custom "relation" edge. */

@@ -16,7 +16,7 @@ export const MAX_AUTO_DEPTH = 2;
  * Supporting material attaches to a research node without opening a new level
  * of investigation, so it never consumes the depth allowance.
  */
-export const SUPPORTING_KINDS: ReadonlySet<NodeKind> = new Set(["evidence", "source"]);
+export const SUPPORTING_KINDS: ReadonlySet<NodeKind> = new Set(["evidence", "source", "note"]);
 
 export const consumesDepth = (kind: NodeKind) => !SUPPORTING_KINDS.has(kind);
 

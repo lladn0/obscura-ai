@@ -1,40 +1,89 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Background,
   BackgroundVariant,
+  ConnectionMode,
   Panel,
   type EdgeChange,
   ReactFlow,
   useReactFlow,
   useStore,
+  type XYPosition,
 } from "@xyflow/react";
-import { FoldVertical, Maximize, Minus, Plus, ScanSearch, UnfoldVertical, X } from "lucide-react";
+import {
+  FoldVertical,
+  Maximize,
+  Minus,
+  PenLine,
+  Plus,
+  ScanSearch,
+  Spline,
+  StickyNote,
+  Trash2,
+  UnfoldVertical,
+  X,
+} from "lucide-react";
 
 import { ancestors, descendants } from "@/graph/hierarchy";
 import type { Board } from "@/graph/use-board";
-import type { ResearchEdge, ResearchNode } from "@/graph/types";
+import type { EdgeRelation, ResearchEdge, ResearchNode } from "@/graph/types";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { BoardViewContext, type BoardView } from "./board-context";
 import { nodeTypes } from "./nodes";
 import { edgeTypes, RelationMarkers, type DisplayEdge } from "./relation-edge";
+import { MANUAL_RELATIONS, RELATION_STYLES } from "./styles";
 
-function CanvasControls({ board }: { board: Board }) {
+function CanvasControls({
+  board,
+  connectMode,
+  onToggleConnect,
+  onAddNote,
+}: {
+  board: Board;
+  connectMode: boolean;
+  onToggleConnect: () => void;
+  onAddNote: () => void;
+}) {
   const { zoomIn, zoomOut } = useReactFlow();
   const zoom = useStore((s) => s.transform[2]);
-  const folded = board.state.collapsed.length > 0;
   return (
     <Panel position="bottom-right">
       <div className="flex items-center gap-0.5 rounded-xl border border-white/10 bg-card/90 p-1 shadow-lg backdrop-blur">
+        <Button variant="ghost" size="icon-sm" aria-label="Add note" title="Add note (N)" onClick={onAddNote}>
+          <StickyNote />
+        </Button>
+        <Button
+          variant={connectMode ? "secondary" : "ghost"}
+          size="icon-sm"
+          aria-pressed={connectMode}
+          aria-label="Connect nodes"
+          title={connectMode ? "Connect mode: drag from one card onto another (C to exit)" : "Connect nodes (C)"}
+          onClick={onToggleConnect}
+          className={cn(connectMode && "text-sky-300")}
+        >
+          <Spline />
+        </Button>
+        <div className="mx-0.5 h-4 w-px bg-white/10" />
         <Button
           variant="ghost"
           size="icon-sm"
-          aria-label={folded ? "Expand all branches" : "Collapse to main branches"}
-          title={folded ? "Expand all branches" : "Collapse to main branches"}
-          onClick={folded ? board.expandAll : board.collapseToBranches}
+          aria-label="Collapse all"
+          title="Collapse all: keep the question and main topics"
+          onClick={board.collapseToBranches}
         >
-          {folded ? <UnfoldVertical /> : <FoldVertical />}
+          <FoldVertical />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Expand all"
+          title="Expand all branches"
+          onClick={board.expandAll}
+        >
+          <UnfoldVertical />
         </Button>
         <div className="mx-0.5 h-4 w-px bg-white/10" />
         <Button variant="ghost" size="icon-sm" aria-label="Zoom out" onClick={() => zoomOut({ duration: 200 })}>
@@ -51,6 +100,136 @@ function CanvasControls({ board }: { board: Board }) {
         </Button>
       </div>
     </Panel>
+  );
+}
+
+/** Relationship type, custom label and delete for the selected connection. */
+function EdgeEditor({ edge, board }: { edge: ResearchEdge; board: Board }) {
+  const data = edge.data!;
+  const [custom, setCustom] = useState(!!data.label);
+  const [label, setLabel] = useState(data.label ?? "");
+  const set = (relation: EdgeRelation, text?: string) =>
+    board.commit({ type: "editEdge", edgeId: edge.id, relation, label: text });
+  const options: EdgeRelation[] = [...MANUAL_RELATIONS];
+  if (!options.includes(data.relation)) options.push(data.relation);
+  return (
+    <Panel position="top-center" className="max-w-[min(640px,calc(100%-2rem))]">
+      <div
+        className="rh-fade-in flex flex-wrap items-center gap-1 rounded-2xl border border-white/10 bg-card/90 p-1 text-xs shadow-lg backdrop-blur"
+        onKeyDown={(e) => e.stopPropagation()}
+      >
+        {options.map((r) => {
+          const active = !custom && data.relation === r;
+          return (
+            <button
+              key={r}
+              type="button"
+              onClick={() => {
+                setCustom(false);
+                set(r);
+              }}
+              className={cn(
+                "rounded-full border px-2 py-0.5 transition-colors",
+                active ? "bg-white/10" : "border-transparent text-muted-foreground hover:text-foreground",
+              )}
+              style={active ? { color: RELATION_STYLES[r].color, borderColor: `${RELATION_STYLES[r].color}60` } : undefined}
+            >
+              {RELATION_STYLES[r].label}
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          onClick={() => setCustom(true)}
+          className={cn(
+            "rounded-full border px-2 py-0.5",
+            custom ? "border-white/20 bg-white/10 text-foreground" : "border-transparent text-muted-foreground hover:text-foreground",
+          )}
+        >
+          custom
+        </button>
+        {custom && (
+          <input
+            autoFocus
+            value={label}
+            placeholder="Relationship…"
+            onChange={(e) => setLabel(e.target.value)}
+            onBlur={() => set(data.relation, label.trim())}
+            onKeyDown={(e) => e.key === "Enter" && set(data.relation, label.trim())}
+            className="h-6 w-36 rounded-md border border-white/15 bg-background/60 px-1.5 text-xs outline-none focus:border-white/30"
+          />
+        )}
+        <div className="mx-0.5 h-4 w-px bg-white/10" />
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          aria-label="Delete connection"
+          title="Delete connection (Del)"
+          onClick={() => board.commit({ type: "deleteEdges", edgeIds: [edge.id] })}
+          className="text-rose-300 hover:text-rose-200"
+        >
+          <Trash2 />
+        </Button>
+      </div>
+    </Panel>
+  );
+}
+
+type MenuState = { x: number; y: number; flow: XYPosition; nodeId?: string };
+
+/** Right-click menu: add a note on the pane, edit/delete on a node. */
+function ContextMenu({ menu, board, onClose }: { menu: MenuState; board: Board; onClose: () => void }) {
+  useEffect(() => {
+    const close = () => onClose();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("pointerdown", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+  const descendantsCount = menu.nodeId ? descendants(board.hierarchy, menu.nodeId).length : 0;
+  const item = (label: string, Icon: typeof X, run: () => void, danger = false) => (
+    <button
+      type="button"
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={() => {
+        run();
+        onClose();
+      }}
+      className={cn(
+        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-white/[0.07]",
+        danger ? "text-rose-300" : "text-foreground/90",
+      )}
+    >
+      <Icon className="size-3.5 opacity-70" />
+      {label}
+    </button>
+  );
+  return (
+    <div
+      className="rh-fade-in absolute z-50 min-w-48 rounded-xl border border-white/10 bg-popover/95 p-1 shadow-xl backdrop-blur"
+      style={{ left: menu.x, top: menu.y }}
+      onContextMenu={(e) => e.preventDefault()}
+    >
+      {menu.nodeId ? (
+        <>
+          {item("Edit", PenLine, () => {
+            board.dispatch({ type: "select", nodeId: menu.nodeId! });
+            board.setEditing(menu.nodeId!);
+          })}
+          {item("Delete", Trash2, () => board.deleteNode(menu.nodeId!), true)}
+          {descendantsCount > 0 &&
+            item(`Delete with branch (${descendantsCount + 1})`, Trash2, () => board.deleteNode(menu.nodeId!, true), true)}
+        </>
+      ) : (
+        item("Add note here", StickyNote, () => {
+          const id = board.addNote(menu.flow);
+          board.setEditing(id);
+        })
+      )}
+    </div>
   );
 }
 
@@ -86,11 +265,36 @@ function BranchFocusBar({
   );
 }
 
-export function BoardCanvas({ board, busy }: { board: Board; busy: ReadonlySet<string> }) {
+export function BoardCanvas({
+  board,
+  busy,
+  connectMode,
+  onToggleConnect,
+}: {
+  board: Board;
+  busy: ReadonlySet<string>;
+  connectMode: boolean;
+  onToggleConnect: () => void;
+}) {
   const { state, dispatch, hierarchy, visible, collapsed, mode } = board;
-  const { fitView } = useReactFlow();
+  const { fitView, screenToFlowPosition } = useReactFlow();
   const { nodes, edges } = state;
-  const selectedId = nodes.find((n) => n.selected)?.id ?? null;
+  const selectedNode = nodes.find((n) => n.selected) ?? null;
+  const selectedId = selectedNode?.id ?? null;
+  const selectedEdge = selectedNode ? null : (edges.find((e) => e.selected) ?? null);
+  const wrapper = useRef<HTMLDivElement>(null);
+  const [menu, setMenu] = useState<MenuState | null>(null);
+
+  const openMenu = (e: MouseEvent | React.MouseEvent, nodeId?: string) => {
+    e.preventDefault();
+    const rect = wrapper.current!.getBoundingClientRect();
+    setMenu({
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top,
+      flow: screenToFlowPosition({ x: e.clientX, y: e.clientY }),
+      nodeId,
+    });
+  };
 
   // The selected node's branch: its path to the root, everything below it, and direct links.
   const branch = useMemo(() => {
@@ -106,7 +310,8 @@ export function BoardCanvas({ board, busy }: { board: Board; busy: ReadonlySet<s
   const displayNodes = useMemo(
     () =>
       nodes.map((n): ResearchNode => {
-        const hidden = !visible.has(n.id);
+        // Notes float freely: folding never hides them.
+        const hidden = n.type !== "note" && !visible.has(n.id);
         const dim = !!branch && !branch.has(n.id);
         return hidden || dim || n.hidden ? { ...n, hidden, className: dim ? "rh-dim" : undefined } : n;
       }),
@@ -136,12 +341,16 @@ export function BoardCanvas({ board, busy }: { board: Board; busy: ReadonlySet<s
       collapsed,
       toggleCollapse: (id) => dispatch({ type: "toggleCollapse", nodeId: id }),
       busy,
+      editingId: board.editingId,
+      setEditing: board.setEditing,
+      saveEdit: (id, edit) => board.commit({ type: "editNode", nodeId: id, edit }),
     }),
-    [mode, hierarchy, collapsed, dispatch, busy],
+    [mode, hierarchy, collapsed, dispatch, busy, board.editingId, board.setEditing, board.commit],
   );
 
   return (
     <BoardViewContext.Provider value={view}>
+      <div ref={wrapper} className="relative size-full">
       <ReactFlow<ResearchNode, DisplayEdge>
         nodes={displayNodes}
         edges={displayEdges}
@@ -155,7 +364,18 @@ export function BoardCanvas({ board, busy }: { board: Board; busy: ReadonlySet<s
         onNodeDragStart={board.stopAnimation}
         onNodeDragStop={(_, __, dragged) => board.pinDragged(dragged.map((n) => n.id))}
         onPaneClick={() => dispatch({ type: "select", nodeId: null })}
-        nodesConnectable={false}
+        onNodeDoubleClick={(_, node) => board.setEditing(node.id)}
+        onPaneContextMenu={(e) => openMenu(e)}
+        onNodeContextMenu={(e, node) => openMenu(e, node.id)}
+        // Manual links are visual only: never research, never hierarchy.
+        onConnect={(c) =>
+          board.commit({ type: "connect", edgeId: `manual-${crypto.randomUUID().slice(0, 8)}`, source: c.source, target: c.target })
+        }
+        nodesConnectable={connectMode}
+        nodesDraggable={!connectMode}
+        connectionMode={ConnectionMode.Loose}
+        connectionRadius={40}
+        zoomOnDoubleClick={false}
         deleteKeyCode={null}
         colorMode="dark"
         fitView
@@ -163,7 +383,7 @@ export function BoardCanvas({ board, busy }: { board: Board; busy: ReadonlySet<s
         minZoom={0.15}
         maxZoom={2}
         proOptions={{ hideAttribution: true }}
-        className="rh-board"
+        className={cn("rh-board", connectMode && "rh-connecting")}
       >
         <RelationMarkers />
         <Background
@@ -173,8 +393,21 @@ export function BoardCanvas({ board, busy }: { board: Board; busy: ReadonlySet<s
           color="rgb(255 255 255 / 0.07)"
           bgColor="transparent"
         />
-        <CanvasControls board={board} />
-        {branch && selectedId && (
+        <CanvasControls
+          board={board}
+          connectMode={connectMode}
+          onToggleConnect={onToggleConnect}
+          onAddNote={board.addNoteAtCenter}
+        />
+        {selectedEdge && <EdgeEditor key={selectedEdge.id} edge={selectedEdge} board={board} />}
+        {connectMode && !selectedEdge && (
+          <Panel position="top-center">
+            <div className="rh-fade-in rounded-full border border-sky-400/30 bg-card/90 px-3 py-1 text-xs text-sky-200 shadow-lg backdrop-blur">
+              Drag from one card onto another to connect them · Esc to finish
+            </div>
+          </Panel>
+        )}
+        {branch && selectedId && selectedNode?.type !== "note" && !connectMode && (
           <BranchFocusBar
             label={nodes.find((n) => n.id === selectedId)?.data.label ?? ""}
             size={[...branch].filter((id) => visible.has(id)).length}
@@ -195,6 +428,8 @@ export function BoardCanvas({ board, busy }: { board: Board; busy: ReadonlySet<s
           </Panel>
         )}
       </ReactFlow>
+      {menu && <ContextMenu menu={menu} board={board} onClose={() => setMenu(null)} />}
+      </div>
     </BoardViewContext.Provider>
   );
 }

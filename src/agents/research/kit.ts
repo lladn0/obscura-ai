@@ -50,6 +50,28 @@ export const quote = z
   .optional()
   .transform((s) => s?.trim().replace(/^["“]|["”]$/g, "") || undefined);
 
+/** Prompt rule for the optional IMAGE field of a record. */
+export const IMAGE_RULE = `IMAGE decides whether a picture genuinely helps a reader understand this item.
+Use one only for concrete visual subjects: anatomy and skeletal structures, organisms, historical artifacts,
+places and maps, buildings, machines and their components, scientific diagrams, artworks.
+For abstract concepts, definitions, finance, philosophy, statistics or plain text claims write: none.
+When useful, write a specific image search query naming the exact subject and view
+(e.g. "human temporal bone lateral view anatomical diagram"), never a generic topic picture,
+and never the same query for two different items.`;
+
+/** IMAGE field: a specific image search query, or nothing. */
+export const imageQuery = z
+  .string()
+  .optional()
+  .transform((s) => {
+    const q = s?.replace(/^["“]|["”]$/g, "").replace(/\s+/g, " ").trim();
+    return !q || /^(none|n\/a|no)\b/i.test(q) ? undefined : q.slice(0, 120);
+  });
+
+/** Node data asking the client to fetch an image (retrieval never blocks text). */
+export const imageData = (query: string | undefined) =>
+  query ? { imageNeeded: true, imageQuery: query, imageStatus: "pending" as const } : {};
+
 const FindingSchema = z.object({
   TITLE: oneLine(140),
   SUMMARY: oneLine(600),
@@ -64,6 +86,7 @@ const FindingSchema = z.object({
     .string()
     .optional()
     .transform((s) => (s ?? "").toUpperCase().match(/F\d+/g)?.map((f) => Number(f.slice(1)) - 1) ?? []),
+  IMAGE: imageQuery,
 });
 
 // --- Emitting graph operations --------------------------------------------------
@@ -177,6 +200,7 @@ Critic: for each finding decide its STATUS:
 QUOTE is an optional short verbatim sentence (6 to 25 words) copied exactly from a cited source; never a title or heading.
 CONTRADICTS optionally lists earlier findings in this answer that this one conflicts with (F1, F2, ...).
 If no sources were found, mark every finding unverified and use SOURCES: none.
+${IMAGE_RULE}
 
 Output ONLY records in exactly this format, no other text, no markdown:
 
@@ -187,6 +211,7 @@ STATUS: verified | unverified | contested
 SOURCES: <comma-separated source ids, or none>
 QUOTE: <verbatim excerpt, or leave empty>
 CONTRADICTS: <finding ids, or leave empty>
+IMAGE: <specific image search query, or none>
 
 Each field value stays on one line.`;
 
@@ -247,6 +272,7 @@ export async function streamFindings({
         verification,
         contested: verification === "contested",
         sourceIds: sourceNodeIds,
+        ...imageData(f.IMAGE),
       });
 
       // A quote only counts as evidence if it really appears in the cited page.

@@ -6,6 +6,9 @@ import { runAction } from "./actions";
 import {
   emitter,
   fieldTarget,
+  IMAGE_RULE,
+  imageData,
+  imageQuery,
   oneLine,
   research,
   streamFindings,
@@ -44,7 +47,7 @@ const ResearchState = Annotation.Root({
 type State = typeof ResearchState.State;
 
 
-const DirectionSchema = z.object({ TITLE: oneLine(120), SUMMARY: oneLine(400), QUERY: oneLine(200) });
+const DirectionSchema = z.object({ TITLE: oneLine(120), SUMMARY: oneLine(400), QUERY: oneLine(200), IMAGE: imageQuery });
 
 const SynthesisSchema = z.object({
   TITLE: oneLine(160),
@@ -56,12 +59,14 @@ const SynthesisSchema = z.object({
 
 const PLANNER_SYSTEM = `You are the planner of a research assistant that builds a visual knowledge map.
 Split the user's research question into 3 to 5 distinct, non-overlapping research directions that together answer it.
+${IMAGE_RULE}
 Output ONLY records in exactly this format, no other text, no markdown:
 
 DIRECTION
 TITLE: <direction title, at most 6 words>
 SUMMARY: <one sentence, at most 20 words, on what this direction investigates>
 QUERY: <a focused web search query for this direction>
+IMAGE: <specific image search query, or none>
 
 Separate records with a blank line. Each field value stays on one line.`;
 
@@ -118,7 +123,7 @@ async function plan(state: State, config: LangGraphRunnableConfig) {
         return;
       }
       const d = parsed.data;
-      e.completed(nodeId, { label: d.TITLE, description: d.SUMMARY });
+      e.completed(nodeId, { label: d.TITLE, description: d.SUMMARY, ...imageData(d.IMAGE) });
       e.branch(d.TITLE, "queued");
       branches.push({ branchId: branchOf(r), nodeId, title: d.TITLE, summary: d.SUMMARY, query: d.QUERY, depth: 1 });
     },

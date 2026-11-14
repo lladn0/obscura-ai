@@ -160,7 +160,8 @@ export const RelationEdge = memo(function RelationEdge({
       : getBezierPath({ ...treeParams(sourceNode, targetNode), curvature: 0.35 }));
   const focus = selected || data.emphasis === "focus";
   const dim = data.emphasis === "dim";
-  const resting = isTreeEdge ? 0.55 : 0.28;
+  const manual = !!data.manual;
+  const resting = manual ? 0.7 : isTreeEdge ? 0.55 : 0.28;
 
   return (
     <>
@@ -168,12 +169,13 @@ export const RelationEdge = memo(function RelationEdge({
         id={id}
         path={path}
         className="rh-edge-path"
-        markerEnd={style.directed ? `url(#rh-arrow-${data.relation})` : undefined}
+        // User-drawn links always show their direction.
+        markerEnd={style.directed || manual ? `url(#rh-arrow-${data.relation})` : undefined}
         interactionWidth={16}
         style={{
           stroke: style.color,
           strokeWidth: focus ? style.width + 0.8 : style.width,
-          strokeDasharray: style.dash,
+          strokeDasharray: manual && data.relation === "related_to" ? undefined : style.dash,
           strokeLinecap: "round",
           opacity: dim ? 0.1 : focus ? 1 : resting,
           transition: "opacity 200ms, stroke-width 200ms",
@@ -187,7 +189,7 @@ export const RelationEdge = memo(function RelationEdge({
         <div
           className={cn(
             "nodrag nopan pointer-events-none absolute rounded-full border bg-background/90 px-1.5 py-px text-[10px] leading-4 font-medium backdrop-blur transition-opacity duration-200",
-            focus ? "opacity-100" : "opacity-0",
+            focus ? "opacity-100" : manual && !dim ? "opacity-70" : "opacity-0",
           )}
           style={{
             transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,

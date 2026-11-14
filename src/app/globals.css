@@ -146,6 +146,26 @@
   border: 0;
 }
 
+/* Connect mode: the whole card becomes a connection handle (drag card -> card). */
+.rh-board.rh-connecting .rh-handle-full {
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform: none;
+  border-radius: 12px;
+  pointer-events: all;
+  cursor: crosshair;
+  background: transparent;
+}
+.rh-board.rh-connecting .react-flow__node:hover .rh-node-card {
+  border-color: rgb(125 211 252 / 0.6);
+}
+.rh-board .react-flow__connectionline path {
+  stroke: rgb(125 211 252 / 0.8);
+  stroke-width: 1.6;
+  stroke-dasharray: 5 4;
+}
+
 /* Strip React Flow's default node chrome; cards style themselves. */
 .rh-board .react-flow__node {
   transition: opacity 200ms ease;

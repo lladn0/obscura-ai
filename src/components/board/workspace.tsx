@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ReactFlowProvider, useReactFlow } from "@xyflow/react";
 import { CopilotKitProvider } from "@copilotkit/react-core/v2";
 import { Menu } from "@base-ui/react/menu";
@@ -26,6 +26,7 @@ import { useResearchAgent } from "@/agents/research/use-research-agent";
 import { ancestors, descendants } from "@/graph/hierarchy";
 import { LAYOUT_MODES, type LayoutMode } from "@/graph/layout";
 import { useBoard } from "@/graph/use-board";
+import { findImage } from "@/integrations/wikimedia";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -94,6 +95,28 @@ function WorkspaceInner() {
   const { setCenter, getNode, getZoom } = useReactFlow();
   const agent = useResearchAgent(dispatch);
   const busy = useMemo(() => new Set(agent.active.keys()), [agent.active]);
+  const [connectMode, setConnectMode] = useState(false);
+
+  // Contextual images: fetched per node, independently of the research stream.
+  const imageJobs = useRef(new Set<string>());
+  useEffect(() => {
+    for (const n of state.nodes) {
+      const d = n.data;
+      if (!d.imageQuery || d.generating || imageJobs.current.has(n.id)) continue;
+      if (d.imageStatus !== "pending" && d.imageStatus !== "loading") continue;
+      imageJobs.current.add(n.id);
+      dispatch({ type: "setImage", nodeId: n.id, data: { imageStatus: "loading" } });
+      void findImage(d.imageQuery)
+        .catch(() => null)
+        .then((found) =>
+          dispatch({
+            type: "setImage",
+            nodeId: n.id,
+            data: found ? { ...found, imageStatus: "ready" } : { imageStatus: "none" },
+          }),
+        );
+    }
+  }, [state.nodes, dispatch]);
 
   /**
    * Run a user action on a node. The server keeps no board state, so the
@@ -190,10 +213,28 @@ function WorkspaceInner() {
     requestAnimationFrame(() => inputRef.current?.focus());
   }, [setFocusMode, setSidebarOpen]);
 
+  const selectedEdge = selected ? null : state.edges.find((e) => e.selected);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.metaKey || e.ctrlKey || e.altKey || isTyping(e.target)) return;
-      if (e.key === "/") {
+      if (isTyping(e.target)) return;
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "z") {
+        if (board.undo()) e.preventDefault();
+        return;
+      }
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === "Delete" || e.key === "Backspace") {
+        // Deleting a node keeps its research descendants as detached nodes.
+        if (selected) board.deleteNode(selected.id);
+        else if (selectedEdge) board.commit({ type: "deleteEdges", edgeIds: [selectedEdge.id] });
+        else return;
+        e.preventDefault();
+      } else if (e.key === "n") {
+        board.addNoteAtCenter();
+        e.preventDefault();
+      } else if (e.key === "c") {
+        setConnectMode((c) => !c);
+      } else if (e.key === "/") {
         e.preventDefault();
         openResearchInput();
       } else if (e.key === "f") {
@@ -201,13 +242,14 @@ function WorkspaceInner() {
       } else if (e.key === "[") {
         setSidebarOpen((o) => !o);
       } else if (e.key === "Escape") {
-        if (selected) dispatch({ type: "select", nodeId: null });
+        if (connectMode) setConnectMode(false);
+        else if (selected || selectedEdge) dispatch({ type: "select", nodeId: null });
         else setFocusMode(false);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selected, dispatch, openResearchInput, setFocusMode, setSidebarOpen]);
+  }, [selected, selectedEdge, connectMode, board, dispatch, openResearchInput, setFocusMode, setSidebarOpen]);
 
   const toggleBranch = (id: string) => dispatch({ type: "toggleCollapse", nodeId: id });
   const folded = state.collapsed.length > 0;
@@ -307,7 +349,12 @@ function WorkspaceInner() {
         </aside>
 
         <main className="relative min-w-0 flex-1">
-          <BoardCanvas board={board} busy={busy} />
+          <BoardCanvas
+            board={board}
+            busy={busy}
+            connectMode={connectMode}
+            onToggleConnect={() => setConnectMode((c) => !c)}
+          />
         </main>
 
         <aside
@@ -341,6 +388,7 @@ function WorkspaceInner() {
                 children: hierarchy.children.get(selected.id)?.length ?? 0,
                 collapsed: collapsed.has(selected.id),
                 hidden: collapsed.has(selected.id) ? descendants(hierarchy, selected.id).length : 0,
+                descendants: descendants(hierarchy, selected.id).length,
               }}
               researchDepth={hierarchy.researchDepth.get(selected.id) ?? 0}
               pinned={!!state.pinned[mode][selected.id]}
@@ -348,6 +396,11 @@ function WorkspaceInner() {
               onCenter={() => centerOn(selected.id)}
               onToggleBranch={() => toggleBranch(selected.id)}
               onUnpin={() => board.unpin([selected.id])}
+              onEdit={() => {
+                centerOn(selected.id);
+                board.setEditing(selected.id);
+              }}
+              onDelete={(withBranch) => board.deleteNode(selected.id, withBranch)}
               investigate={{
                 active: agent.active.get(selected.id),
                 note: agent.notes[selected.id],

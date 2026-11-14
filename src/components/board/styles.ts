@@ -4,6 +4,7 @@ import {
   Lightbulb,
   Library,
   MessageSquareQuote,
+  StickyNote,
   type LucideIcon,
 } from "lucide-react";
 
@@ -69,7 +70,19 @@ export const KIND_STYLES: Record<NodeKind, KindStyle> = {
     ring: "ring-emerald-400/70 shadow-[0_0_0_6px_rgb(52_211_153/0.12),0_12px_40px_-12px_rgb(52_211_153/0.5)]",
     dot: "bg-emerald-400",
   },
+  note: {
+    label: "Note",
+    icon: StickyNote,
+    chip: "bg-yellow-400/15 text-yellow-200",
+    text: "text-yellow-200/90",
+    border: "border-dashed border-yellow-300/30",
+    ring: "ring-yellow-300/60 shadow-[0_0_0_6px_rgb(253_224_71/0.08),0_12px_40px_-12px_rgb(253_224_71/0.35)]",
+    dot: "bg-yellow-300",
+  },
 };
+
+/** Relationship choices offered for user-drawn connections. */
+export const MANUAL_RELATIONS = ["related_to", "supports", "contradicts", "causes", "explains"] as const;
 
 type RelationStyle = {
   label: string;

@@ -3,10 +3,11 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useReactFlow, type XYPosition } from "@xyflow/react";
 
-import { boardReducer, emptyBoard, loadBoard, saveBoard, type BoardState } from "./board-state";
+import { boardReducer, emptyBoard, loadBoard, saveBoard, type BoardAction, type BoardState } from "./board-state";
 import { createDemoBoard } from "./demo";
-import { buildHierarchy, defaultCollapsed, visibleIds, type Hierarchy } from "./hierarchy";
-import { computeLayout, LAYOUT_MODES, type LayoutMode } from "./layout";
+import { buildHierarchy, defaultCollapsed, descendants, visibleIds, type Hierarchy } from "./hierarchy";
+import { computeLayout, LAYOUT_MODES, sizeOf, type LayoutMode } from "./layout";
+import type { ResearchNode } from "./types";
 
 const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
 
@@ -44,6 +45,58 @@ function layoutTargets(state: BoardState, mode: LayoutMode, h: Hierarchy, visibl
   return targets;
 }
 
+type Rect = { x: number; y: number; w: number; h: number };
+const CLEARANCE = 24;
+const hits = (a: Rect, b: Rect) =>
+  a.x < b.x + b.w + CLEARANCE && b.x < a.x + a.w + CLEARANCE && a.y < b.y + b.h + CLEARANCE && b.y < a.y + a.h + CLEARANCE;
+
+/**
+ * Floating notes that a newly revealed branch would land on move the minimum
+ * distance needed to clear it. Notes that are not hit never move, and notes
+ * sitting right next to a moved note travel with it, so small groups stay together.
+ */
+function clearNotes(nodes: ResearchNode[], incoming: Rect[]): Map<string, { x: number; y: number }> {
+  const moved = new Map<string, { x: number; y: number }>();
+  if (!incoming.length) return moved;
+  const notes = nodes.filter((n) => n.type === "note");
+  const rectOf = (n: ResearchNode): Rect => {
+    const { width, height } = sizeOf(n);
+    return { x: n.position.x, y: n.position.y, w: width, h: height };
+  };
+  for (const note of notes) {
+    if (moved.has(note.id)) continue;
+    const r = rectOf(note);
+    let dx = 0;
+    let dy = 0;
+    for (let i = 0; i < 8; i++) {
+      const cur = { ...r, x: r.x + dx, y: r.y + dy };
+      const block = incoming.find((b) => hits(cur, b));
+      if (!block) break;
+      // Smallest push out of the obstructing card, along one axis.
+      const options = [
+        { dx: block.x - CLEARANCE - (cur.x + cur.w), dy: 0 },
+        { dx: block.x + block.w + CLEARANCE - cur.x, dy: 0 },
+        { dx: 0, dy: block.y - CLEARANCE - (cur.y + cur.h) },
+        { dx: 0, dy: block.y + block.h + CLEARANCE - cur.y },
+      ].sort((a, b) => Math.abs(a.dx) + Math.abs(a.dy) - (Math.abs(b.dx) + Math.abs(b.dy)));
+      dx += options[0].dx;
+      dy += options[0].dy;
+    }
+    if (!dx && !dy) continue;
+    moved.set(note.id, { x: r.x + dx, y: r.y + dy });
+    // Neighbouring notes (a manual group) keep their placement relative to this one.
+    for (const other of notes) {
+      if (other.id === note.id || moved.has(other.id)) continue;
+      if (hits(rectOf(other), r)) moved.set(other.id, { x: other.position.x + dx, y: other.position.y + dy });
+    }
+  }
+  return moved;
+}
+
+const MAX_UNDO = 40;
+/** User edits that can be undone with Ctrl/Cmd+Z. */
+const UNDOABLE = new Set<BoardAction["type"]>(["addNote", "editNode", "deleteNodes", "deleteEdges", "connect", "editEdge"]);
+
 /**
  * Board state, layout and persistence. Client-only (reads localStorage while
  * initialising) and must be rendered inside a ReactFlowProvider.
@@ -57,7 +110,9 @@ export function useBoard() {
   const [mode, setModeState] = useState<LayoutMode>(loadMode);
   /** Bumped when the board is replaced wholesale, to force a fresh layout. */
   const [generation, setGeneration] = useState(0);
-  const { fitView } = useReactFlow();
+  const { fitView, screenToFlowPosition } = useReactFlow();
+  /** Node being edited in place (transient, not persisted). */
+  const [editingId, setEditing] = useState<string | null>(null);
 
   const stateRef = useRef(state);
   const modeRef = useRef(mode);
@@ -70,9 +125,10 @@ export function useBoard() {
 
   // The tree only depends on which nodes/edges exist, not on positions, so it
   // is rebuilt on structural changes rather than every animation frame.
+  // Notes and manual links never affect the research tree, so they don't re-flow it.
   const structureKey = [
-    state.nodes.map((n) => `${n.id}:${n.type}`).join(","),
-    state.edges.map((e) => `${e.source}>${e.target}`).join(","),
+    state.nodes.filter((n) => n.type !== "note").map((n) => `${n.id}:${n.type}`).join(","),
+    state.edges.filter((e) => !e.data?.manual).map((e) => `${e.source}>${e.target}`).join(","),
   ].join("|");
   const hierarchy = useMemo(
     () => buildHierarchy(state.nodes, state.edges),
@@ -142,6 +198,18 @@ export function useBoard() {
       }
       shownRef.current = vis;
 
+      // Newly revealed research cards push aside floating notes they would cover.
+      if (shown) {
+        const incoming: Rect[] = [];
+        const byId = new Map(s.nodes.map((n) => [n.id, n]));
+        for (const [id, p] of targets) {
+          if (shown.has(id)) continue;
+          const { width, height } = sizeOf(byId.get(id)!);
+          incoming.push({ x: p.x, y: p.y, w: width, h: height });
+        }
+        for (const [id, p] of clearNotes(s.nodes, incoming)) targets.set(id, p);
+      }
+
       pendingFit.current ||= fit;
       animateTo(targets, from, () => {
         if (pendingFit.current) fitView(FIT);
@@ -188,7 +256,10 @@ export function useBoard() {
   }, []);
 
   const pinDragged = useCallback(
-    (nodeIds: string[]) => {
+    (dragged: string[]) => {
+      // Notes are free-floating: their position is simply their node position.
+      const nodeIds = dragged.filter((id) => stateRef.current.nodes.find((n) => n.id === id)?.type !== "note");
+      if (!nodeIds.length) return;
       dispatch({ type: "pin", mode: modeRef.current, nodeIds });
       // Let the dragged node's branch follow it.
       requestAnimationFrame(() => relayout());
@@ -210,10 +281,79 @@ export function useBoard() {
     [hierarchy],
   );
 
+  // --- Editing with undo -----------------------------------------------------
+
+  const history = useRef<BoardState[]>([]);
+  const commit = useCallback((action: BoardAction) => {
+    if (UNDOABLE.has(action.type)) {
+      history.current = [...history.current.slice(-(MAX_UNDO - 1)), stateRef.current];
+    }
+    dispatch(action);
+  }, []);
+
+  /**
+   * Restore the board before the last edit. Research that streamed in since
+   * then is kept: only the user's own change is rolled back.
+   */
+  const undo = useCallback(() => {
+    const prev = history.current.pop();
+    if (!prev) return false;
+    stopAnimation();
+    const cur = stateRef.current;
+    const had = new Set(prev.nodes.map((n) => n.id));
+    const hadEdge = new Set(prev.edges.map((e) => e.id));
+    const newResearch = cur.nodes.filter((n) => !had.has(n.id) && n.type !== "note");
+    const newEdges = cur.edges.filter((e) => !hadEdge.has(e.id) && !e.data?.manual);
+    const positions = new Map(cur.nodes.map((n) => [n.id, n.position]));
+    dispatch({
+      type: "replace",
+      state: {
+        ...cur,
+        nodes: [...prev.nodes.map((n) => ({ ...n, position: positions.get(n.id) ?? n.position })), ...newResearch],
+        edges: [...prev.edges, ...newEdges],
+        collapsed: cur.collapsed,
+        pinned: prev.pinned,
+        deleted: prev.deleted,
+      },
+    });
+    return true;
+  }, [stopAnimation]);
+
+  const addNote = useCallback(
+    (position: XYPosition) => {
+      const nodeId = `note-${crypto.randomUUID().slice(0, 8)}`;
+      commit({ type: "addNote", nodeId, position });
+      return nodeId;
+    },
+    [commit],
+  );
+
+  /** New note at the centre of the visible canvas, ready to type into. */
+  const addNoteAtCenter = useCallback(() => {
+    const pane = document.querySelector(".rh-board")?.getBoundingClientRect();
+    const center = pane
+      ? screenToFlowPosition({ x: pane.left + pane.width / 2, y: pane.top + pane.height / 2 })
+      : { x: 0, y: 0 };
+    // Nudge so several new notes don't stack exactly on top of each other.
+    const jitter = (Math.random() - 0.5) * 40;
+    const id = addNote({ x: center.x - 110 + jitter, y: center.y - 40 + jitter });
+    setEditing(id);
+  }, [addNote, screenToFlowPosition]);
+
+  /** Delete a node. Its research descendants stay (detached) unless `withBranch`. */
+  const deleteNode = useCallback(
+    (id: string, withBranch = false) => {
+      const h = buildHierarchy(stateRef.current.nodes, stateRef.current.edges);
+      commit({ type: "deleteNodes", nodeIds: withBranch ? [id, ...descendants(h, id)] : [id] });
+    },
+    [commit],
+  );
+
   const resetDemo = useCallback(() => {
     stopAnimation();
     shownRef.current = null;
     fitNext.current = true;
+    history.current = [];
     dispatch({ type: "replace", state: createDemoBoard() });
     setGeneration((g) => g + 1);
   }, [stopAnimation]);
@@ -224,7 +364,16 @@ export function useBoard() {
       stopAnimation();
       shownRef.current = null;
       fitNext.current = true;
-      dispatch({ type: "replace", state: { ...emptyBoard, title, pinned: { sun: {}, tree: {} } } });
+      // The user's own notes (and links between them) survive starting new research.
+      const s = stateRef.current;
+      const notes = s.nodes.filter((n) => n.type === "note" && !n.data.demo);
+      const ids = new Set(notes.map((n) => n.id));
+      const links = s.edges.filter((e) => ids.has(e.source) && ids.has(e.target));
+      history.current = [];
+      dispatch({
+        type: "replace",
+        state: { ...emptyBoard, title, nodes: notes, edges: links, pinned: { sun: {}, tree: {} }, deleted: [] },
+      });
       setGeneration((g) => g + 1);
     },
     [stopAnimation],
@@ -245,6 +394,13 @@ export function useBoard() {
     expandAll,
     collapseToBranches,
     resetDemo,
+    commit,
+    undo,
+    addNote,
+    addNoteAtCenter,
+    deleteNode,
+    editingId,
+    setEditing,
     fit: useCallback(() => fitView(FIT), [fitView]),
   };
 }

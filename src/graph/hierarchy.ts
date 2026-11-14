@@ -20,10 +20,16 @@ export type Hierarchy = {
   researchDepth: Map<string, number>;
 };
 
+/**
+ * User notes and user-drawn connections are free-floating canvas objects:
+ * they never take part in the research hierarchy (layout, folding, depth).
+ */
 export function buildHierarchy(
-  nodes: Pick<ResearchNode, "id" | "type">[],
-  edges: Pick<ResearchEdge, "source" | "target">[],
+  allNodes: Pick<ResearchNode, "id" | "type">[],
+  allEdges: Pick<ResearchEdge, "source" | "target" | "data">[],
 ): Hierarchy {
+  const nodes = allNodes.filter((n) => n.type !== "note");
+  const edges = allEdges.filter((e) => !e.data?.manual);
   const parent = new Map<string, string | null>();
   const children = new Map<string, string[]>();
   const depth = new Map<string, number>();

@@ -8,7 +8,9 @@ import {
   UnfoldVertical,
   Crosshair,
   PanelRightClose,
+  PenLine,
   PinOff,
+  Trash2,
   X,
 } from "lucide-react";
 
@@ -20,7 +22,7 @@ import { cn } from "@/lib/utils";
 import type { ActionNote } from "@/agents/research/use-research-agent";
 import type { NodeAction } from "@/agents/research/protocol";
 import { EvidenceTrail, InvestigateActions } from "./node-investigate";
-import { ConfidenceBar } from "./nodes";
+import { ConfidenceBar, ImageCredit, ImageLightbox } from "./nodes";
 import { KIND_STYLES, RELATION_STYLES } from "./styles";
 
 const CONNECTIONS_PREVIEW = 4;
@@ -83,6 +85,8 @@ function KindFields({ node }: { node: ResearchNode }) {
           )}
         </>
       );
+    case "note":
+      return null;
     case "source":
       return (
         <>
@@ -104,7 +108,8 @@ function KindFields({ node }: { node: ResearchNode }) {
   }
 }
 
-export type BranchInfo = { children: number; collapsed: boolean; hidden: number };
+export type BranchInfo = { children: number; collapsed: boolean; hidden: number; descendants?: number };
+const descendantCount = (b: BranchInfo) => b.descendants ?? b.children;
 
 export function NodeDetails({
   node,
@@ -118,6 +123,8 @@ export function NodeDetails({
   onCenter,
   onToggleBranch,
   onUnpin,
+  onEdit,
+  onDelete,
   onCollapsePanel,
   onClose,
 }: {
@@ -132,10 +139,16 @@ export function NodeDetails({
   onCenter: () => void;
   onToggleBranch: () => void;
   onUnpin: () => void;
+  onEdit: () => void;
+  /** `withBranch` also deletes every research descendant. */
+  onDelete: (withBranch: boolean) => void;
   onCollapsePanel: () => void;
   onClose: () => void;
 }) {
   const [showAll, setShowAll] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [zoomImage, setZoomImage] = useState(false);
+  const isNote = node.type === "note";
   const style = KIND_STYLES[node.type];
   const Icon = style.icon;
   const byId = new Map(nodes.map((n) => [n.id, n]));
@@ -176,6 +189,63 @@ export function NodeDetails({
           {node.data.description && (
             <p className="mt-2 text-sm leading-relaxed break-words text-muted-foreground">{node.data.description}</p>
           )}
+          {node.data.userEdited && (
+            <p className="mt-1.5 flex items-center gap-1 text-[11px] text-muted-foreground">
+              <PenLine className="size-3" /> Edited by you · research updates won&apos;t overwrite it
+            </p>
+          )}
+        </div>
+
+        {node.data.imageUrl && (
+          <figure className="space-y-1">
+            <button
+              type="button"
+              onClick={() => setZoomImage(true)}
+              title="Open larger image"
+              className="block w-full overflow-hidden rounded-lg border border-white/[0.06] bg-white/[0.04]"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={node.data.imageUrl} alt={node.data.imageAlt ?? ""} loading="lazy" className="h-40 w-full object-contain" />
+            </button>
+            <figcaption>
+              <ImageCredit image={node.data} />
+            </figcaption>
+            {zoomImage && <ImageLightbox image={node.data} onClose={() => setZoomImage(false)} />}
+          </figure>
+        )}
+
+        <div className="flex flex-wrap gap-1.5">
+          <Button variant="outline" size="xs" onClick={onEdit} title="Edit title and description (double-click the card)">
+            <PenLine /> Edit
+          </Button>
+          {!confirmDelete ? (
+            <Button
+              variant="outline"
+              size="xs"
+              className="text-rose-300 hover:text-rose-200"
+              title="Delete (Del)"
+              onClick={() => (branch.children > 0 ? setConfirmDelete(true) : onDelete(false))}
+            >
+              <Trash2 /> Delete
+            </Button>
+          ) : (
+            <div className="w-full space-y-1.5 rounded-lg border border-rose-400/20 bg-rose-400/[0.04] p-2.5">
+              <p className="text-xs text-foreground/90">
+                This node has {descendantCount(branch)} research nodes below it.
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                <Button variant="outline" size="xs" onClick={() => onDelete(false)}>
+                  Delete node, keep branch
+                </Button>
+                <Button variant="destructive" size="xs" onClick={() => onDelete(true)}>
+                  Delete entire branch
+                </Button>
+                <Button variant="ghost" size="xs" onClick={() => setConfirmDelete(false)}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
 
         <InvestigateActions node={node} active={investigate.active} note={investigate.note} onRun={investigate.onRun} />
@@ -200,7 +270,11 @@ export function NodeDetails({
         </div>
 
         <dl className="space-y-4">
-          <Field label="Research depth">{describeDepth(researchDepth, node.type)}</Field>
+          {isNote ? (
+            <Field label="Type">Your note · floats freely, outside the research layout</Field>
+          ) : (
+            <Field label="Research depth">{describeDepth(researchDepth, node.type)}</Field>
+          )}
           <KindFields node={node} />
         </dl>
 
@@ -211,7 +285,8 @@ export function NodeDetails({
             </h3>
             <ul className="space-y-1.5">
               {shown.map(({ edge, outgoing, other }) => {
-                const rel = RELATION_STYLES[edge.data!.relation];
+                const rel = { ...RELATION_STYLES[edge.data!.relation] };
+                if (edge.data!.label) rel.label = edge.data!.label;
                 const otherStyle = KIND_STYLES[other!.type];
                 return (
                   <li key={edge.id}>
