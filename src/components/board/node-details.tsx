@@ -22,6 +22,13 @@ import { KIND_STYLES, RELATION_STYLES } from "./styles";
 
 const CONNECTIONS_PREVIEW = 4;
 
+const VERIFICATION_TEXT = { verified: "text-emerald-300", unverified: "text-amber-300", contested: "text-rose-300" } as const;
+const VERIFICATION_HINT = {
+  verified: "Stated in at least one cited source.",
+  unverified: "Not clearly supported by the retrieved sources.",
+  contested: "Sources disagree or the claim is disputed.",
+} as const;
+
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1">
@@ -47,7 +54,15 @@ function KindFields({ node }: { node: ResearchNode }) {
               />
             </Field>
           )}
-          {node.type === "claim" && node.data.contested && (
+          {node.type === "claim" && node.data.verification && (
+            <Field label="Evidence status">
+              <span className={cn("capitalize", VERIFICATION_TEXT[node.data.verification])}>{node.data.verification}</span>
+              <span className="mt-0.5 block text-xs text-muted-foreground">
+                {VERIFICATION_HINT[node.data.verification]}
+              </span>
+            </Field>
+          )}
+          {node.type === "claim" && !node.data.verification && node.data.contested && (
             <Field label="Status"><span className="text-rose-300">Contested</span></Field>
           )}
         </>

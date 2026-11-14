@@ -43,9 +43,15 @@ export type QuestionData = BaseNodeData & {
   status?: "open" | "exploring" | "answered";
 };
 
+export type Verification = "verified" | "unverified" | "contested";
+
 export type ClaimData = BaseNodeData & {
   confidence?: Confidence;
   contested?: boolean;
+  /** Critic's verdict on whether the cited sources back this claim. */
+  verification?: Verification;
+  /** Ids of the source nodes this claim cites. */
+  sourceIds?: string[];
 };
 
 export type EvidenceData = BaseNodeData & {

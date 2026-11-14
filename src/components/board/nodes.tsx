@@ -186,6 +186,12 @@ const QuestionNodeView = memo(function QuestionNodeView({ id, data, selected }: 
   );
 });
 
+export const VERIFICATION_PILL = {
+  verified: "border-emerald-400/30 text-emerald-300 capitalize",
+  unverified: "border-amber-400/30 text-amber-300 capitalize",
+  contested: "border-rose-400/30 text-rose-300 capitalize",
+} as const;
+
 const ClaimNodeView = memo(function ClaimNodeView({ id, data, selected }: NodeProps<ClaimNode>) {
   return (
     <Shell
@@ -195,7 +201,13 @@ const ClaimNodeView = memo(function ClaimNodeView({ id, data, selected }: NodePr
       selected={selected}
       label={data.label}
       description={data.description}
-      meta={data.contested && <Pill className="border-rose-400/30 text-rose-300">Contested</Pill>}
+      meta={
+        data.verification ? (
+          <Pill className={VERIFICATION_PILL[data.verification]}>{data.verification}</Pill>
+        ) : (
+          data.contested && <Pill className="border-rose-400/30 text-rose-300">Contested</Pill>
+        )
+      }
       footer={
         data.confidence !== undefined && (
           <ConfidenceBar value={data.confidence} className="bg-sky-400/80" />

@@ -53,7 +53,15 @@ export function useResearchAgent(dispatch: Dispatch<BoardAction>) {
         switch (event.name) {
           case GraphEvent.NodeCreated: {
             const v = event.value as NodeCreated;
-            enqueue({ op: "node", nodeId: v.nodeId, kind: v.kind, researchId: v.researchId, branchId: v.branchId, data: v.data });
+            enqueue({
+              op: "node",
+              nodeId: v.nodeId,
+              kind: v.kind,
+              researchId: v.researchId,
+              branchId: v.branchId,
+              data: v.data,
+              collapsed: v.collapsed,
+            });
             break;
           }
           case GraphEvent.NodeText: {
@@ -64,9 +72,11 @@ export function useResearchAgent(dispatch: Dispatch<BoardAction>) {
             enqueue({ op: "text", nodeId: v.nodeId, field: v.field, delta: v.delta });
             break;
           }
-          case GraphEvent.NodeCompleted:
-            enqueue({ op: "done", nodeId: (event.value as NodeCompleted).nodeId });
+          case GraphEvent.NodeCompleted: {
+            const v = event.value as NodeCompleted;
+            enqueue({ op: "done", nodeId: v.nodeId, data: v.data });
             break;
+          }
           case GraphEvent.EdgeCreated: {
             const v = event.value as EdgeCreated;
             enqueue({ op: "edge", edgeId: v.edgeId, source: v.source, target: v.target, relation: v.relation });

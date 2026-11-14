@@ -4,6 +4,7 @@ import { Observable } from "rxjs";
 
 import { researchGraph, type ResearchChunk } from "./graph";
 import type { ResearchRunProps, ResearchState } from "./protocol";
+import { BranchScheduler } from "./scheduler";
 
 /**
  * AG-UI agent that runs the LangGraph research workflow in-process and
@@ -51,7 +52,11 @@ export class ResearchAgent extends AbstractAgent {
 
         const stream = await researchGraph.stream(
           { researchId, question },
-          { streamMode: "custom", signal: abort.signal },
+          {
+            streamMode: "custom",
+            signal: abort.signal,
+            configurable: { scheduler: new BranchScheduler(), sourceNodes: new Set<string>() },
+          },
         );
         for await (const chunk of stream) toEvents(chunk as ResearchChunk);
 

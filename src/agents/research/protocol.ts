@@ -34,10 +34,13 @@ export type NodeCreated = Ids & {
   kind: NodeKind;
   /** Non-text fields (confidence, stance, ...). Text arrives via NodeText. */
   data?: Record<string, unknown>;
+  /** Start with this node's branch folded (e.g. a finding's evidence and sources). */
+  collapsed?: boolean;
 };
 /** `seq` increases per node, so the client can keep order and drop duplicates. */
 export type NodeText = Ids & { seq: number; field: "label" | "description"; delta: string };
-export type NodeCompleted = Ids;
+/** `data` is the schema-validated final content; it replaces the provisional streamed text. */
+export type NodeCompleted = Ids & { data?: Record<string, unknown> };
 export type EdgeCreated = Omit<Ids, "nodeId"> & {
   edgeId: string;
   source: string;

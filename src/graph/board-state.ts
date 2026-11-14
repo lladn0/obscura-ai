@@ -40,15 +40,25 @@ export type BoardAction =
 
 /** Agent graph operations, applied in arrival order as one batch per frame. */
 export type StreamOp =
-  | { op: "node"; nodeId: string; kind: NodeKind; researchId: string; branchId: string; data?: Record<string, unknown> }
+  | {
+      op: "node";
+      nodeId: string;
+      kind: NodeKind;
+      researchId: string;
+      branchId: string;
+      data?: Record<string, unknown>;
+      collapsed?: boolean;
+    }
   | { op: "text"; nodeId: string; field: "label" | "description"; delta: string }
-  | { op: "done"; nodeId: string }
+  /** `data` is validated final content and replaces provisional streamed text. */
+  | { op: "done"; nodeId: string; data?: Record<string, unknown> }
   | { op: "edge"; edgeId: string; source: string; target: string; relation: EdgeRelation };
 
 function applyStream(state: BoardState, ops: StreamOp[]): BoardState {
   const nodes = new Map(state.nodes.map((n) => [n.id, n]));
   const edges = new Map(state.edges.map((e) => [e.id, e]));
   const created: string[] = [];
+  const collapsed = new Set(state.collapsed);
   const patch = (id: string, fn: (data: ResearchNode["data"]) => ResearchNode["data"]) => {
     const n = nodes.get(id);
     if (n) nodes.set(id, { ...n, data: fn(n.data) } as ResearchNode);
@@ -65,12 +75,13 @@ function applyStream(state: BoardState, ops: StreamOp[]): BoardState {
           data: { label: "", ...op.data, generating: true, researchId: op.researchId, branchId: op.branchId },
         } as ResearchNode);
         created.push(op.nodeId);
+        if (op.collapsed) collapsed.add(op.nodeId);
         break;
       case "text":
         patch(op.nodeId, (d) => ({ ...d, [op.field]: (d[op.field] ?? "") + op.delta }));
         break;
       case "done":
-        patch(op.nodeId, (d) => ({ ...d, generating: false }));
+        patch(op.nodeId, (d) => ({ ...d, ...op.data, generating: false }) as ResearchNode["data"]);
         break;
       case "edge":
         if (!nodes.has(op.source) || !nodes.has(op.target) || edges.has(op.edgeId)) break;
@@ -93,7 +104,12 @@ function applyStream(state: BoardState, ops: StreamOp[]): BoardState {
       .find((other) => other && !created.includes(other));
     if (neighbour) nodes.set(id, { ...nodes.get(id)!, position: nodes.get(neighbour)!.position });
   }
-  return { ...state, nodes: [...nodes.values()], edges: edgeList };
+  return {
+    ...state,
+    nodes: [...nodes.values()],
+    edges: edgeList,
+    collapsed: collapsed.size === state.collapsed.length ? state.collapsed : [...collapsed],
+  };
 }
 
 export const emptyBoard: BoardState = {
