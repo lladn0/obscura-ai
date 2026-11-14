@@ -6,6 +6,10 @@ import { researchGraph, type ResearchChunk } from "./graph";
 import { ACTION_RESULT_EVENT, USAGE_EVENT, type ActionResult, type ResearchRunProps, type ResearchState } from "./protocol";
 import { createSearch } from "./search";
 
+/** Stop a run just before the platform's function limit (maxDuration 300s) so the client gets a clear message. */
+const RUN_TIME_LIMIT_MS = Number(process.env.RESEARCH_TIME_LIMIT_MS) || 285_000;
+const MAX_QUESTION_CHARS = 500;
+
 /** Nodes with a user action in flight (per server process): one action per node at a time. */
 const activeNodes = new Set<string>();
 
@@ -20,7 +24,12 @@ export class ResearchAgent extends AbstractAgent {
       const emit = (event: BaseEvent) => !subscriber.closed && subscriber.next(event);
       const { threadId, runId } = input;
       const props = (input.forwardedProps ?? {}) as Partial<ResearchRunProps>;
-      const question = props.question?.trim() || "Untitled research question";
+      const question = props.question?.trim().slice(0, MAX_QUESTION_CHARS) || "Untitled research question";
+      let timedOut = false;
+      const deadline = setTimeout(() => {
+        timedOut = true;
+        abort.abort();
+      }, RUN_TIME_LIMIT_MS);
       const researchId = props.researchId ?? runId;
       const action = props.action;
       let ownsNode = false;
@@ -102,9 +111,20 @@ export class ResearchAgent extends AbstractAgent {
           `[research] ${researchId}: ${totals.llmRequests} LLM requests ~$${totals.llmCost.toFixed(4)}, ` +
             `Firecrawl ~${totals.credits} credits`,
         );
+        clearTimeout(deadline);
         emit({ type: EventType.RUN_FINISHED, threadId, runId } as BaseEvent);
         subscriber.complete();
       })().catch((error: unknown) => {
+        clearTimeout(deadline);
+        if (timedOut) {
+          if (!action)
+            emit({ type: EventType.STATE_DELTA, delta: [{ op: "replace", path: "/phase", value: "error" }] } as BaseEvent);
+          emit({
+            type: EventType.RUN_ERROR,
+            message: "Research stopped at the server time limit. Results received so far are kept on the board.",
+          } as BaseEvent);
+          return subscriber.complete();
+        }
         if (abort.signal.aborted) return subscriber.complete();
         if (!action)
           emit({ type: EventType.STATE_DELTA, delta: [{ op: "replace", path: "/phase", value: "error" }] } as BaseEvent);
@@ -113,6 +133,7 @@ export class ResearchAgent extends AbstractAgent {
       });
 
       return () => {
+        clearTimeout(deadline);
         abort.abort();
         if (ownsNode) activeNodes.delete(action!.target.id);
       };
