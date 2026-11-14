@@ -209,16 +209,35 @@ export function useBoard(boardId: string) {
       }
       shownRef.current = vis;
 
-      // Newly revealed research cards push aside floating notes they would cover.
+      const byId = new Map(s.nodes.map((n) => [n.id, n]));
+      const rectAt = (id: string, p: XYPosition): Rect => {
+        const { width, height } = sizeOf(byId.get(id)!);
+        return { x: p.x, y: p.y, w: width, h: height };
+      };
+      const anchored = (n: ResearchNode) => n.type === "note" && !!n.data.anchorNodeId;
+
+      // Connected notes move with their anchor (stored offset kept), then step off any card they'd cover.
+      const attached: ResearchNode[] = [];
+      for (const n of s.nodes) {
+        if (n.type !== "note" || !n.data.anchorNodeId) continue;
+        const a = targets.get(n.data.anchorNodeId);
+        if (!a) continue; // anchor folded away: the note is hidden with it and keeps its place
+        attached.push({ ...n, position: { x: a.x + (n.data.offsetX ?? 0), y: a.y + (n.data.offsetY ?? 0) } });
+      }
+      if (attached.length) {
+        const cards = [...targets].map(([id, p]) => rectAt(id, p));
+        for (const n of attached) targets.set(n.id, n.position);
+        for (const [id, p] of clearNotes(attached, cards)) targets.set(id, p);
+      }
+
+      // Newly revealed research cards push aside standalone notes they would cover.
       if (shown) {
         const incoming: Rect[] = [];
-        const byId = new Map(s.nodes.map((n) => [n.id, n]));
         for (const [id, p] of targets) {
-          if (shown.has(id)) continue;
-          const { width, height } = sizeOf(byId.get(id)!);
-          incoming.push({ x: p.x, y: p.y, w: width, h: height });
+          if (shown.has(id) || byId.get(id)?.type === "note") continue;
+          incoming.push(rectAt(id, p));
         }
-        for (const [id, p] of clearNotes(s.nodes, incoming)) targets.set(id, p);
+        for (const [id, p] of clearNotes(s.nodes.filter((n) => !anchored(n)), incoming)) targets.set(id, p);
       }
 
       pendingFit.current ||= fit;

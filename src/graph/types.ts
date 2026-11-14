@@ -101,7 +101,15 @@ export type InsightData = BaseNodeData & {
 };
 
 /** A user-created sticky note: free-floating, outside the research hierarchy. */
-export type NoteData = BaseNodeData;
+export type NoteData = BaseNodeData & {
+  /**
+   * Primary spatial anchor: the first research node the note was connected to.
+   * The note sits at anchor.position + offset and follows the anchor when it moves.
+   */
+  anchorNodeId?: string;
+  offsetX?: number;
+  offsetY?: number;
+};
 
 export type QuestionNode = Node<QuestionData, "question">;
 export type ClaimNode = Node<ClaimData, "claim">;

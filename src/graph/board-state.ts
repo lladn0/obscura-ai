@@ -209,7 +209,94 @@ export function mergeGraph(state: BoardState, patch: GraphPatch): BoardState {
   return patch.activity ? log(next, patch.activity) : next;
 }
 
+// --- Note anchoring ------------------------------------------------------------
+
+/**
+ * Keeps each note's spatial anchor in line with its manual connections: the first
+ * linked research node anchors it (offset taken from current positions); extra links
+ * stay semantic only. If the anchor's link is removed, the next link takes over; a
+ * note with no research links becomes standalone where it currently is.
+ */
+export function reanchorNotes(state: BoardState): BoardState {
+  const byId = new Map(state.nodes.map((n) => [n.id, n]));
+  const links = new Map<string, string[]>();
+  for (const e of state.edges) {
+    if (!e.data?.manual) continue;
+    for (const [a, b] of [
+      [e.source, e.target],
+      [e.target, e.source],
+    ]) {
+      const other = byId.get(b);
+      if (byId.get(a)?.type === "note" && other && other.type !== "note") links.set(a, [...(links.get(a) ?? []), b]);
+    }
+  }
+  let changed = false;
+  const nodes = state.nodes.map((n): ResearchNode => {
+    if (n.type !== "note") return n;
+    const linked = links.get(n.id) ?? [];
+    const current = n.data.anchorNodeId;
+    if (current && linked.includes(current)) return n;
+    if (!linked.length) {
+      if (!current) return n;
+      changed = true;
+      return { ...n, data: { ...n.data, anchorNodeId: undefined, offsetX: undefined, offsetY: undefined } };
+    }
+    const anchor = byId.get(linked[0])!;
+    changed = true;
+    return {
+      ...n,
+      data: {
+        ...n.data,
+        anchorNodeId: anchor.id,
+        offsetX: n.position.x - anchor.position.x,
+        offsetY: n.position.y - anchor.position.y,
+      },
+    };
+  });
+  return changed ? { ...state, nodes } : state;
+}
+
+/**
+ * Manual drags: notes follow an anchor the user is dragging; a note dragged on its
+ * own (anchor not moving) gets a new offset, so the user's placement is kept.
+ */
+function followDrag(next: BoardState, changes: NodeChange<ResearchNode>[]): BoardState {
+  const moved = new Set(changes.flatMap((c) => (c.type === "position" && c.position ? [c.id] : [])));
+  if (!moved.size) return next;
+  const byId = new Map(next.nodes.map((n) => [n.id, n]));
+  let changed = false;
+  const nodes = next.nodes.map((n): ResearchNode => {
+    if (n.type !== "note" || !n.data.anchorNodeId) return n;
+    const anchor = byId.get(n.data.anchorNodeId);
+    if (!anchor) return n;
+    if (moved.has(n.data.anchorNodeId) && !moved.has(n.id)) {
+      changed = true;
+      return {
+        ...n,
+        position: { x: anchor.position.x + (n.data.offsetX ?? 0), y: anchor.position.y + (n.data.offsetY ?? 0) },
+      };
+    }
+    if (moved.has(n.id) && !moved.has(n.data.anchorNodeId)) {
+      changed = true;
+      return {
+        ...n,
+        data: { ...n.data, offsetX: n.position.x - anchor.position.x, offsetY: n.position.y - anchor.position.y },
+      };
+    }
+    return n;
+  });
+  return changed ? { ...next, nodes } : next;
+}
+
 export function boardReducer(state: BoardState, action: BoardAction): BoardState {
+  const next = reduceBoard(state, action);
+  if (next === state) return next;
+  if (action.type === "nodesChange") return followDrag(next, action.changes);
+  // Connections changed (connect, delete, research stream, replace): re-check anchors.
+  return next.edges !== state.edges ? reanchorNotes(next) : next;
+}
+
+function reduceBoard(state: BoardState, action: BoardAction): BoardState {
   switch (action.type) {
     case "nodesChange":
       return { ...state, nodes: applyNodeChanges(action.changes, state.nodes) };
@@ -393,14 +480,15 @@ export function loadBoard(key: string): BoardState | null {
 
 /** Boards saved before collapsing/pinning existed get sensible defaults. */
 export function withDefaults(state: BoardState, saved: Partial<BoardState> = {}): BoardState {
-  return {
+  // Connected notes saved before anchoring existed get an anchor from their first manual link.
+  return reanchorNotes({
     ...state,
     collapsed: Array.isArray(saved.collapsed)
       ? saved.collapsed
       : defaultCollapsed(buildHierarchy(state.nodes, state.edges)),
     pinned: { sun: saved.pinned?.sun ?? {}, tree: saved.pinned?.tree ?? {} },
     deleted: Array.isArray(saved.deleted) ? saved.deleted : [],
-  };
+  });
 }
 
 export function saveBoard(key: string, state: BoardState) {
