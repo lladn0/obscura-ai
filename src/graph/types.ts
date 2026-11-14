@@ -33,6 +33,10 @@ type BaseNodeData = {
   description?: string;
   /** Illustrative content that was not produced by research. */
   demo?: boolean;
+  /** True while an agent is still streaming this node's text. */
+  generating?: boolean;
+  researchId?: string;
+  branchId?: string;
 };
 
 export type QuestionData = BaseNodeData & {

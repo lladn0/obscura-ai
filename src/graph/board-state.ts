@@ -8,7 +8,7 @@ import {
 
 import { buildHierarchy, defaultCollapsed } from "./hierarchy";
 import type { LayoutMode } from "./layout";
-import type { GraphPatch, ResearchEdge, ResearchNode } from "./types";
+import type { EdgeRelation, GraphPatch, NodeKind, ResearchEdge, ResearchNode } from "./types";
 
 export type ActivityEntry = { id: string; at: string; message: string };
 
@@ -34,8 +34,67 @@ export type BoardAction =
   | { type: "setCollapsed"; nodeIds: string[] }
   | { type: "pin"; mode: LayoutMode; nodeIds: string[] }
   | { type: "unpin"; mode: LayoutMode; nodeIds: string[] | "all" }
+  | { type: "stream"; ops: StreamOp[] }
   | { type: "log"; message: string }
   | { type: "replace"; state: BoardState };
+
+/** Agent graph operations, applied in arrival order as one batch per frame. */
+export type StreamOp =
+  | { op: "node"; nodeId: string; kind: NodeKind; researchId: string; branchId: string; data?: Record<string, unknown> }
+  | { op: "text"; nodeId: string; field: "label" | "description"; delta: string }
+  | { op: "done"; nodeId: string }
+  | { op: "edge"; edgeId: string; source: string; target: string; relation: EdgeRelation };
+
+function applyStream(state: BoardState, ops: StreamOp[]): BoardState {
+  const nodes = new Map(state.nodes.map((n) => [n.id, n]));
+  const edges = new Map(state.edges.map((e) => [e.id, e]));
+  const created: string[] = [];
+  const patch = (id: string, fn: (data: ResearchNode["data"]) => ResearchNode["data"]) => {
+    const n = nodes.get(id);
+    if (n) nodes.set(id, { ...n, data: fn(n.data) } as ResearchNode);
+  };
+
+  for (const op of ops) {
+    switch (op.op) {
+      case "node":
+        if (nodes.has(op.nodeId)) break; // duplicate create: keep what we have
+        nodes.set(op.nodeId, {
+          id: op.nodeId,
+          type: op.kind,
+          position: { x: 0, y: 0 },
+          data: { label: "", ...op.data, generating: true, researchId: op.researchId, branchId: op.branchId },
+        } as ResearchNode);
+        created.push(op.nodeId);
+        break;
+      case "text":
+        patch(op.nodeId, (d) => ({ ...d, [op.field]: (d[op.field] ?? "") + op.delta }));
+        break;
+      case "done":
+        patch(op.nodeId, (d) => ({ ...d, generating: false }));
+        break;
+      case "edge":
+        if (!nodes.has(op.source) || !nodes.has(op.target) || edges.has(op.edgeId)) break;
+        edges.set(op.edgeId, {
+          id: op.edgeId,
+          source: op.source,
+          target: op.target,
+          type: "relation",
+          data: { relation: op.relation },
+        });
+        break;
+    }
+  }
+
+  // New nodes start on a connected neighbour; the layout pass grows them outward.
+  const edgeList = [...edges.values()];
+  for (const id of created) {
+    const neighbour = edgeList
+      .map((e) => (e.source === id ? e.target : e.target === id ? e.source : null))
+      .find((other) => other && !created.includes(other));
+    if (neighbour) nodes.set(id, { ...nodes.get(id)!, position: nodes.get(neighbour)!.position });
+  }
+  return { ...state, nodes: [...nodes.values()], edges: edgeList };
+}
 
 export const emptyBoard: BoardState = {
   title: "Untitled research",
@@ -145,6 +204,8 @@ export function boardReducer(state: BoardState, action: BoardAction): BoardState
       }
       return { ...state, pinned: { ...state.pinned, [action.mode]: pins } };
     }
+    case "stream":
+      return applyStream(state, action.ops);
     case "log":
       return log(state, action.message);
     case "replace":

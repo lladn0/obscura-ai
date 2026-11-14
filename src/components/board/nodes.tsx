@@ -50,8 +50,10 @@ function Shell({
   footer,
   className,
   labelClassName,
+  generating,
 }: {
   id: string;
+  generating?: boolean;
   kind: NodeKind;
   selected?: boolean;
   label: string;
@@ -88,7 +90,13 @@ function Shell({
         </span>
         <span className="ml-auto flex items-center gap-1">
           {meta}
-          {description && (
+          {generating && (
+            <span className="relative flex size-2" title="Generating">
+              <span className="absolute inline-flex size-full animate-ping rounded-full bg-sky-400/60" />
+              <span className="relative inline-flex size-2 rounded-full bg-sky-400" />
+            </span>
+          )}
+          {description && !generating && (
             <button
               type="button"
               onClick={(e) => {
@@ -105,18 +113,27 @@ function Shell({
           )}
         </span>
       </div>
-      <p
-        className={cn(
-          "text-[13px] leading-snug font-medium break-words text-foreground",
-          !open && "line-clamp-3",
-          labelClassName,
-        )}
-      >
-        {label}
-      </p>
-      {open && description && (
-        <p className="rh-fade-in mt-1.5 text-xs leading-relaxed break-words text-muted-foreground">
+      {label || !generating ? (
+        <p
+          className={cn(
+            "text-[13px] leading-snug font-medium break-words text-foreground",
+            !open && !generating && "line-clamp-3",
+            labelClassName,
+          )}
+        >
+          {label}
+          {generating && !description && <span className="rh-caret" />}
+        </p>
+      ) : (
+        <div className="space-y-1.5 py-1" aria-label="Generating">
+          <div className="h-2.5 w-4/5 animate-pulse rounded bg-white/10" />
+          <div className="h-2.5 w-1/2 animate-pulse rounded bg-white/10" />
+        </div>
+      )}
+      {(open || generating) && description && (
+        <p className="mt-1.5 text-xs leading-relaxed break-words text-muted-foreground">
           {description}
+          {generating && <span className="rh-caret" />}
         </p>
       )}
       {footer && <div className="mt-2">{footer}</div>}
@@ -158,6 +175,7 @@ const QuestionNodeView = memo(function QuestionNodeView({ id, data, selected }: 
   return (
     <Shell
       id={id}
+      generating={data.generating}
       kind="question"
       selected={selected}
       label={data.label}
@@ -172,6 +190,7 @@ const ClaimNodeView = memo(function ClaimNodeView({ id, data, selected }: NodePr
   return (
     <Shell
       id={id}
+      generating={data.generating}
       kind="claim"
       selected={selected}
       label={data.label}
@@ -196,6 +215,7 @@ const EvidenceNodeView = memo(function EvidenceNodeView({ id, data, selected }: 
   return (
     <Shell
       id={id}
+      generating={data.generating}
       kind="evidence"
       selected={selected}
       label={data.label}
@@ -215,6 +235,7 @@ const SourceNodeView = memo(function SourceNodeView({ id, data, selected }: Node
   return (
     <Shell
       id={id}
+      generating={data.generating}
       kind="source"
       selected={selected}
       label={data.label}
@@ -229,6 +250,7 @@ const InsightNodeView = memo(function InsightNodeView({ id, data, selected }: No
   return (
     <Shell
       id={id}
+      generating={data.generating}
       kind="insight"
       selected={selected}
       label={data.label}

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useReactFlow, type XYPosition } from "@xyflow/react";
 
-import { boardReducer, loadBoard, saveBoard, type BoardState } from "./board-state";
+import { boardReducer, emptyBoard, loadBoard, saveBoard, type BoardState } from "./board-state";
 import { createDemoBoard } from "./demo";
 import { buildHierarchy, defaultCollapsed, visibleIds, type Hierarchy } from "./hierarchy";
 import { computeLayout, LAYOUT_MODES, type LayoutMode } from "./layout";
@@ -11,7 +11,7 @@ import { computeLayout, LAYOUT_MODES, type LayoutMode } from "./layout";
 const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
 
 const MODE_KEY = "rabbithole:layout-mode";
-const FIT = { padding: 0.15, duration: 500 };
+const FIT = { padding: 0.15, duration: 500, maxZoom: 1 };
 
 function loadMode(): LayoutMode {
   try {
@@ -171,7 +171,8 @@ export function useBoard() {
   useEffect(() => {
     if (sizeKeyRef.current === sizeKey) return;
     sizeKeyRef.current = sizeKey;
-    const timer = setTimeout(() => relayout(), 120);
+    // Streaming text changes sizes constantly; re-flow only once it pauses.
+    const timer = setTimeout(() => relayout(), 350);
     return () => clearTimeout(timer);
   }, [sizeKey, relayout]);
 
@@ -217,8 +218,21 @@ export function useBoard() {
     setGeneration((g) => g + 1);
   }, [stopAnimation]);
 
+  /** Start a fresh, empty board (used when research begins from the demo board). */
+  const newBoard = useCallback(
+    (title: string) => {
+      stopAnimation();
+      shownRef.current = null;
+      fitNext.current = true;
+      dispatch({ type: "replace", state: { ...emptyBoard, title, pinned: { sun: {}, tree: {} } } });
+      setGeneration((g) => g + 1);
+    },
+    [stopAnimation],
+  );
+
   return {
     state,
+    newBoard,
     dispatch,
     mode,
     setMode,

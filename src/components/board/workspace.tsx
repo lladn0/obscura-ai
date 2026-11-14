@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef } from "react";
 import { ReactFlowProvider, useReactFlow } from "@xyflow/react";
+import { CopilotKitProvider } from "@copilotkit/react-core/v2";
 import { Menu } from "@base-ui/react/menu";
 import {
   FoldVertical,
@@ -20,6 +21,7 @@ import {
   Sun,
 } from "lucide-react";
 
+import { useResearchAgent } from "@/agents/research/use-research-agent";
 import { ancestors, descendants } from "@/graph/hierarchy";
 import { LAYOUT_MODES, type LayoutMode } from "@/graph/layout";
 import { useBoard } from "@/graph/use-board";
@@ -27,6 +29,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { BoardCanvas } from "./board-canvas";
+import { AgentStatus } from "./agent-status";
 import { NodeDetails } from "./node-details";
 import { ResearchSidebar } from "./research-sidebar";
 import { usePersistentState } from "./use-persistent-state";
@@ -88,6 +91,7 @@ function WorkspaceInner() {
   const board = useBoard();
   const { state, dispatch, mode, setMode, hierarchy, visible, collapsed } = board;
   const { setCenter, getNode, getZoom } = useReactFlow();
+  const agent = useResearchAgent(dispatch);
   const selected = state.nodes.find((n) => n.selected) ?? null;
 
   const [sidebarOpen, setSidebarOpen] = usePersistentState("rabbithole:sidebar-open", true);
@@ -121,18 +125,18 @@ function WorkspaceInner() {
     [dispatch, visible, hierarchy, state.collapsed, centerOn],
   );
 
-  const addQuestion = (label: string) => {
-    const id = `q-${crypto.randomUUID().slice(0, 8)}`;
-    dispatch({
-      type: "merge",
-      patch: {
-        nodes: [{ id, type: "question", data: { label, status: "open" } }],
-        activity: `Added question: “${label}”`,
-      },
+  /**
+   * Research a question through the agent. From the demo board it starts a
+   * fresh board; on a real board the new question joins as another branch.
+   */
+  const startResearch = (question: string) => {
+    if (agent.running) return;
+    const fresh = state.isDemo || state.nodes.length === 0;
+    if (fresh) board.newBoard(question);
+    const researchId = `r-${crypto.randomUUID().slice(0, 8)}`;
+    void agent.startResearch({ question, researchId }).then(() => {
+      if (fresh) board.fit();
     });
-    dispatch({ type: "select", nodeId: id });
-    // Wait for the layout animation to settle before centering.
-    setTimeout(() => centerOn(id), 650);
   };
 
   const openResearchInput = useCallback(() => {
@@ -193,7 +197,10 @@ function WorkspaceInner() {
           )}
         </div>
 
-        <LayoutSwitch mode={mode} onChange={setMode} />
+        <div className="flex items-center gap-2">
+          <LayoutSwitch mode={mode} onChange={setMode} />
+          <AgentStatus research={agent.research} running={agent.running} error={agent.error} />
+        </div>
 
         <div className="flex items-center justify-end gap-1">
           <Button
@@ -247,7 +254,8 @@ function WorkspaceInner() {
             activity={state.activity}
             selectedId={selected?.id ?? null}
             inputRef={inputRef}
-            onAddQuestion={addQuestion}
+            onAddQuestion={startResearch}
+            busy={agent.running}
             onSelect={focusNode}
           />
         </aside>
@@ -306,8 +314,10 @@ function WorkspaceInner() {
 
 export default function Workspace() {
   return (
-    <ReactFlowProvider>
-      <WorkspaceInner />
-    </ReactFlowProvider>
+    <CopilotKitProvider runtimeUrl="/api/copilotkit">
+      <ReactFlowProvider>
+        <WorkspaceInner />
+      </ReactFlowProvider>
+    </CopilotKitProvider>
   );
 }

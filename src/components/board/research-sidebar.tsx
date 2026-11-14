@@ -125,6 +125,7 @@ export function ResearchSidebar({
   activity,
   selectedId,
   inputRef,
+  busy,
   onAddQuestion,
   onSelect,
 }: {
@@ -132,6 +133,7 @@ export function ResearchSidebar({
   activity: ActivityEntry[];
   selectedId: string | null;
   inputRef: RefObject<HTMLTextAreaElement | null>;
+  busy: boolean;
   onAddQuestion: (question: string) => void;
   onSelect: (id: string) => void;
 }) {
@@ -139,7 +141,7 @@ export function ResearchSidebar({
   const [allQuestions, setAllQuestions] = useState(false);
   const submit = () => {
     const q = draft.trim();
-    if (!q) return;
+    if (!q || busy) return;
     onAddQuestion(q);
     setDraft("");
   };
@@ -165,7 +167,13 @@ export function ResearchSidebar({
             className="max-h-40 min-h-14 resize-none border-0 bg-transparent p-1.5 text-sm shadow-none focus-visible:ring-0 dark:bg-transparent"
           />
           <div className="flex items-center justify-end">
-            <Button size="icon-sm" aria-label="Add question" onClick={submit} disabled={!draft.trim()}>
+            <Button
+              size="icon-sm"
+              aria-label="Start research"
+              title={busy ? "Research in progress…" : "Start research (Enter)"}
+              onClick={submit}
+              disabled={!draft.trim() || busy}
+            >
               <ArrowUp />
             </Button>
           </div>
