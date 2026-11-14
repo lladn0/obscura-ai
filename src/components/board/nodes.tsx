@@ -1,7 +1,8 @@
 "use client";
 
-import { memo, type ReactNode } from "react";
+import { memo, useState, type ReactNode } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
+import { ChevronDown, Minus } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 import { NODE_WIDTH } from "@/graph/layout";
@@ -13,9 +14,34 @@ import type {
   QuestionNode,
   SourceNode,
 } from "@/graph/types";
+import { useBranch } from "./board-context";
 import { KIND_STYLES } from "./styles";
 
+/** Fold/unfold the branch below a node. Always visible when folded, on hover otherwise. */
+function BranchToggle({ id, selected }: { id: string; selected?: boolean }) {
+  const branch = useBranch(id);
+  if (!branch.children) return null;
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        branch.toggle();
+      }}
+      aria-label={branch.collapsed ? `Expand ${branch.hidden} hidden nodes` : "Collapse branch"}
+      title={branch.collapsed ? `Show ${branch.hidden} more` : "Collapse branch"}
+      className={cn(
+        "nodrag absolute -bottom-2.5 left-1/2 flex h-5 min-w-5 -translate-x-1/2 items-center justify-center gap-0.5 rounded-full border border-white/15 bg-background px-1.5 text-[10px] font-medium text-muted-foreground shadow-sm transition-[opacity,color,border-color] hover:border-white/30 hover:text-foreground",
+        !branch.collapsed && !selected && "opacity-0 group-hover:opacity-100 focus-visible:opacity-100",
+      )}
+    >
+      {branch.collapsed ? `+${branch.hidden}` : <Minus className="size-3" />}
+    </button>
+  );
+}
+
 function Shell({
+  id,
   kind,
   selected,
   label,
@@ -25,6 +51,7 @@ function Shell({
   className,
   labelClassName,
 }: {
+  id: string;
   kind: NodeKind;
   selected?: boolean;
   label: string;
@@ -34,41 +61,66 @@ function Shell({
   className?: string;
   labelClassName?: string;
 }) {
+  const [open, setOpen] = useState(false);
   const style = KIND_STYLES[kind];
   const Icon = style.icon;
   return (
     <div
       style={{ width: NODE_WIDTH[kind] }}
       className={cn(
-        "rh-node-card group relative rounded-xl border bg-card/95 px-3.5 py-3 shadow-[0_8px_24px_-12px_rgb(0_0_0/0.6)] backdrop-blur-sm",
-        "transition-[box-shadow,border-color,transform] duration-200 hover:-translate-y-px hover:border-white/20",
+        "rh-node-card group relative rounded-xl border bg-card/95 px-3 py-2.5 shadow-[0_8px_24px_-12px_rgb(0_0_0/0.6)] backdrop-blur-sm",
+        "transition-[box-shadow,border-color] duration-200 hover:border-white/20",
         style.border,
         selected && cn("ring-2", style.ring),
         className,
       )}
     >
       {/* Edges are "floating" (see relation-edge.tsx); handles only anchor them. */}
-      <Handle type="target" position={Position.Left} className="rh-handle" isConnectable={false} />
-      <Handle type="source" position={Position.Right} className="rh-handle" isConnectable={false} />
+      <Handle type="target" position={Position.Top} className="rh-handle" isConnectable={false} />
+      <Handle type="source" position={Position.Bottom} className="rh-handle" isConnectable={false} />
 
-      <div className="mb-2 flex items-center gap-2">
-        <span className={cn("flex size-5 items-center justify-center rounded-md", style.chip)}>
+      <div className="mb-1.5 flex items-center gap-1.5">
+        <span className={cn("flex size-4.5 items-center justify-center rounded-md", style.chip)}>
           <Icon className="size-3" />
         </span>
         <span className={cn("text-[10px] font-semibold tracking-[0.12em] uppercase", style.text)}>
           {style.label}
         </span>
-        {meta && <span className="ml-auto flex items-center gap-1">{meta}</span>}
+        <span className="ml-auto flex items-center gap-1">
+          {meta}
+          {description && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setOpen((o) => !o);
+              }}
+              aria-expanded={open}
+              aria-label={open ? "Hide summary" : "Show summary"}
+              title={open ? "Hide summary" : "Show summary"}
+              className="nodrag -mr-1 flex size-5 items-center justify-center rounded-md text-muted-foreground/70 hover:bg-white/5 hover:text-foreground"
+            >
+              <ChevronDown className={cn("size-3.5 transition-transform", open && "rotate-180")} />
+            </button>
+          )}
+        </span>
       </div>
-      <p className={cn("text-[13px] leading-snug font-medium text-foreground", labelClassName)}>
+      <p
+        className={cn(
+          "text-[13px] leading-snug font-medium break-words text-foreground",
+          !open && "line-clamp-3",
+          labelClassName,
+        )}
+      >
         {label}
       </p>
-      {description && (
-        <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
+      {open && description && (
+        <p className="rh-fade-in mt-1.5 text-xs leading-relaxed break-words text-muted-foreground">
           {description}
         </p>
       )}
-      {footer && <div className="mt-2.5">{footer}</div>}
+      {footer && <div className="mt-2">{footer}</div>}
+      <BranchToggle id={id} selected={selected} />
     </div>
   );
 }
@@ -88,7 +140,7 @@ function Pill({ children, className }: { children: ReactNode; className?: string
 
 export function ConfidenceBar({ value, className }: { value: number; className?: string }) {
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-2" title={`Confidence ${Math.round(value * 100)}%`}>
       <div className="h-1 flex-1 overflow-hidden rounded-full bg-white/8">
         <div
           className={cn("h-full rounded-full transition-[width] duration-500", className)}
@@ -102,23 +154,24 @@ export function ConfidenceBar({ value, className }: { value: number; className?:
   );
 }
 
-const QuestionNodeView = memo(function QuestionNodeView({ data, selected }: NodeProps<QuestionNode>) {
+const QuestionNodeView = memo(function QuestionNodeView({ id, data, selected }: NodeProps<QuestionNode>) {
   return (
     <Shell
+      id={id}
       kind="question"
       selected={selected}
       label={data.label}
       description={data.description}
-      className="bg-gradient-to-br from-violet-500/12 via-card/95 to-card/95 px-4 py-3.5"
+      className="bg-gradient-to-br from-violet-500/15 via-card/95 to-card/95 px-3.5 py-3"
       labelClassName="text-[15px] font-semibold tracking-tight"
-      meta={data.status && <Pill className="capitalize">{data.status}</Pill>}
     />
   );
 });
 
-const ClaimNodeView = memo(function ClaimNodeView({ data, selected }: NodeProps<ClaimNode>) {
+const ClaimNodeView = memo(function ClaimNodeView({ id, data, selected }: NodeProps<ClaimNode>) {
   return (
     <Shell
+      id={id}
       kind="claim"
       selected={selected}
       label={data.label}
@@ -139,15 +192,17 @@ const STANCE_PILL = {
   neutral: "",
 } as const;
 
-const EvidenceNodeView = memo(function EvidenceNodeView({ data, selected }: NodeProps<EvidenceNode>) {
+const EvidenceNodeView = memo(function EvidenceNodeView({ id, data, selected }: NodeProps<EvidenceNode>) {
   return (
     <Shell
+      id={id}
       kind="evidence"
       selected={selected}
       label={data.label}
       description={data.description}
       meta={
-        data.stance && (
+        data.stance &&
+        data.stance !== "neutral" && (
           <Pill className={cn("capitalize", STANCE_PILL[data.stance])}>{data.stance}</Pill>
         )
       }
@@ -155,28 +210,30 @@ const EvidenceNodeView = memo(function EvidenceNodeView({ data, selected }: Node
   );
 });
 
-const SourceNodeView = memo(function SourceNodeView({ data, selected }: NodeProps<SourceNode>) {
+const SourceNodeView = memo(function SourceNodeView({ id, data, selected }: NodeProps<SourceNode>) {
   const byline = [data.publisher, data.year].filter(Boolean).join(" · ");
   return (
     <Shell
+      id={id}
       kind="source"
       selected={selected}
       label={data.label}
+      description={data.description}
       className="bg-card/80"
-      meta={data.sourceType && <Pill className="capitalize">{data.sourceType}</Pill>}
       footer={byline && <p className="font-mono text-[10px] text-muted-foreground">{byline}</p>}
     />
   );
 });
 
-const InsightNodeView = memo(function InsightNodeView({ data, selected }: NodeProps<InsightNode>) {
+const InsightNodeView = memo(function InsightNodeView({ id, data, selected }: NodeProps<InsightNode>) {
   return (
     <Shell
+      id={id}
       kind="insight"
       selected={selected}
       label={data.label}
       description={data.description}
-      className="bg-gradient-to-br from-emerald-500/12 via-card/95 to-card/95"
+      className="bg-gradient-to-br from-emerald-500/15 via-card/95 to-card/95"
       footer={
         data.confidence !== undefined && (
           <ConfidenceBar value={data.confidence} className="bg-emerald-400/80" />

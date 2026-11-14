@@ -1,34 +1,123 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { ReactFlowProvider, useReactFlow } from "@xyflow/react";
-import { LayoutDashboard, Maximize, Rabbit, RotateCcw } from "lucide-react";
+import { Menu } from "@base-ui/react/menu";
+import {
+  FoldVertical,
+  UnfoldVertical,
+  Ellipsis,
+  Focus,
+  LayoutDashboard,
+  Maximize,
+  Network,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightOpen,
+  Rabbit,
+  RotateCcw,
+  Sun,
+} from "lucide-react";
 
+import { ancestors, descendants } from "@/graph/hierarchy";
+import { LAYOUT_MODES, type LayoutMode } from "@/graph/layout";
 import { useBoard } from "@/graph/use-board";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { BoardCanvas, FIT_VIEW_OPTIONS } from "./board-canvas";
+import { cn } from "@/lib/utils";
+import { BoardCanvas } from "./board-canvas";
 import { NodeDetails } from "./node-details";
 import { ResearchSidebar } from "./research-sidebar";
+import { usePersistentState } from "./use-persistent-state";
+
+const MODE_META: Record<LayoutMode, { label: string; icon: typeof Sun; hint: string }> = {
+  sun: { label: "Sun", icon: Sun, hint: "Radial: the question at the centre, branches radiating out" },
+  tree: { label: "Tree", icon: Network, hint: "Hierarchy: the question on top, topics branching down" },
+};
+
+function LayoutSwitch({ mode, onChange }: { mode: LayoutMode; onChange: (m: LayoutMode) => void }) {
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Board layout"
+      className="flex items-center rounded-lg border border-white/10 bg-white/[0.03] p-0.5"
+    >
+      {LAYOUT_MODES.map((m) => {
+        const { label, icon: Icon, hint } = MODE_META[m];
+        const active = m === mode;
+        return (
+          <button
+            key={m}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            title={hint}
+            onClick={() => onChange(m)}
+            className={cn(
+              "flex h-6 items-center gap-1.5 rounded-md px-2.5 text-[11px] font-semibold tracking-[0.12em] uppercase transition-colors",
+              active ? "bg-white/10 text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <Icon className="size-3.5" />
+            {label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function MenuItem({ icon: Icon, children, onClick }: { icon: typeof Sun; children: React.ReactNode; onClick: () => void }) {
+  return (
+    <Menu.Item
+      onClick={onClick}
+      className="flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-sm text-foreground/90 outline-none select-none data-highlighted:bg-white/[0.07] data-highlighted:text-foreground [&_svg]:size-3.5 [&_svg]:text-muted-foreground"
+    >
+      <Icon />
+      {children}
+    </Menu.Item>
+  );
+}
+
+const isTyping = (target: EventTarget | null) =>
+  target instanceof HTMLElement &&
+  (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
 
 function WorkspaceInner() {
-  const { state, dispatch, relayout, resetDemo } = useBoard();
-  const { fitView, setCenter, getNode, getZoom } = useReactFlow();
+  const board = useBoard();
+  const { state, dispatch, mode, setMode, hierarchy, visible, collapsed } = board;
+  const { setCenter, getNode, getZoom } = useReactFlow();
   const selected = state.nodes.find((n) => n.selected) ?? null;
 
-  const fit = useCallback(() => fitView(FIT_VIEW_OPTIONS), [fitView]);
+  const [sidebarOpen, setSidebarOpen] = usePersistentState("rabbithole:sidebar-open", true);
+  const [detailsOpen, setDetailsOpen] = usePersistentState("rabbithole:details-open", true);
+  const [focusMode, setFocusMode] = usePersistentState("rabbithole:focus-mode", false);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
+  const showSidebar = sidebarOpen && !focusMode;
+  const detailsWidth = !selected || focusMode ? 0 : detailsOpen ? 320 : 44;
+
+  const centerOn = useCallback(
+    (id: string) => {
+      const node = getNode(id);
+      if (!node) return;
+      const w = node.measured?.width ?? 0;
+      const h = node.measured?.height ?? 0;
+      setCenter(node.position.x + w / 2, node.position.y + h / 2, { duration: 500, zoom: Math.max(getZoom(), 0.7) });
+    },
+    [getNode, getZoom, setCenter],
+  );
+
+  /** Select a node, unfolding its branch if needed, and bring it into view. */
   const focusNode = useCallback(
     (id: string) => {
       dispatch({ type: "select", nodeId: id });
-      const node = getNode(id);
-      if (node) {
-        const w = node.measured?.width ?? 0;
-        const h = node.measured?.height ?? 0;
-        setCenter(node.position.x + w / 2, node.position.y + h / 2, { duration: 500, zoom: getZoom() });
-      }
+      if (visible.has(id)) return centerOn(id);
+      const unfold = new Set(ancestors(hierarchy, id));
+      dispatch({ type: "setCollapsed", nodeIds: state.collapsed.filter((c) => !unfold.has(c)) });
+      setTimeout(() => centerOn(id), 650);
     },
-    [dispatch, getNode, getZoom, setCenter],
+    [dispatch, visible, hierarchy, state.collapsed, centerOn],
   );
 
   const addQuestion = (label: string) => {
@@ -40,51 +129,173 @@ function WorkspaceInner() {
         activity: `Added question: “${label}”`,
       },
     });
-    requestAnimationFrame(() => focusNode(id));
+    dispatch({ type: "select", nodeId: id });
+    // Wait for the layout animation to settle before centering.
+    setTimeout(() => centerOn(id), 650);
   };
 
+  const openResearchInput = useCallback(() => {
+    setFocusMode(false);
+    setSidebarOpen(true);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, [setFocusMode, setSidebarOpen]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey || isTyping(e.target)) return;
+      if (e.key === "/") {
+        e.preventDefault();
+        openResearchInput();
+      } else if (e.key === "f") {
+        setFocusMode((f) => !f);
+      } else if (e.key === "[") {
+        setSidebarOpen((o) => !o);
+      } else if (e.key === "Escape") {
+        if (selected) dispatch({ type: "select", nodeId: null });
+        else setFocusMode(false);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selected, dispatch, openResearchInput, setFocusMode, setSidebarOpen]);
+
+  const toggleBranch = (id: string) => dispatch({ type: "toggleCollapse", nodeId: id });
+  const folded = state.collapsed.length > 0;
+
   return (
-    <div className="flex h-screen flex-col bg-background text-foreground">
-      <header className="flex h-12 shrink-0 items-center gap-3 border-b border-white/[0.06] px-4">
-        <div className="flex items-center gap-2">
-          <span className="flex size-7 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 shadow-[0_0_20px_-4px_rgb(168_85_247/0.7)]">
-            <Rabbit className="size-4 text-white" />
-          </span>
-          <span className="text-sm font-semibold tracking-tight">RabbitHole AI</span>
-        </div>
-        <span className="text-white/15">/</span>
-        <span className="truncate text-sm text-muted-foreground">{state.title}</span>
-        {state.isDemo && (
-          <Badge variant="outline" className="border-amber-400/30 text-amber-200/80">
-            Demo data
-          </Badge>
-        )}
-        <div className="ml-auto flex items-center gap-1">
-          <Button variant="ghost" size="sm" onClick={() => relayout(fit)}>
-            <LayoutDashboard /> Auto-layout
-          </Button>
-          <Button variant="ghost" size="sm" onClick={fit}>
-            <Maximize /> Fit view
-          </Button>
+    <div className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
+      <header className="grid h-12 shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-3 border-b border-white/[0.06] px-2">
+        <div className="flex min-w-0 items-center gap-2">
           <Button
             variant="ghost"
-            size="sm"
-            onClick={() => {
-              resetDemo();
-              requestAnimationFrame(() => fit());
-            }}
+            size="icon-sm"
+            aria-label={showSidebar ? "Hide sidebar" : "Show sidebar"}
+            title={showSidebar ? "Hide sidebar ([)" : "Show sidebar ([)"}
+            onClick={() => (focusMode ? openResearchInput() : setSidebarOpen(!sidebarOpen))}
           >
-            <RotateCcw /> Reset demo
+            {showSidebar ? <PanelLeftClose /> : <PanelLeftOpen />}
           </Button>
+          <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-violet-500 to-fuchsia-500">
+            <Rabbit className="size-3.5 text-white" />
+          </span>
+          <span className="truncate text-sm font-medium" title={state.title}>
+            {state.title}
+          </span>
+          {state.isDemo && (
+            <Badge
+              variant="outline"
+              className="shrink-0 border-amber-400/30 text-amber-200/80"
+              title="Illustrative content, not live research"
+            >
+              Demo
+            </Badge>
+          )}
+        </div>
+
+        <LayoutSwitch mode={mode} onChange={setMode} />
+
+        <div className="flex items-center justify-end gap-1">
+          <Button
+            variant={focusMode ? "secondary" : "ghost"}
+            size="sm"
+            aria-pressed={focusMode}
+            title="Focus mode: hide panels (F)"
+            onClick={() => setFocusMode(!focusMode)}
+          >
+            <Focus /> <span className="hidden sm:inline">Focus</span>
+          </Button>
+          <Menu.Root>
+            <Menu.Trigger
+              render={<Button variant="ghost" size="icon-sm" aria-label="More board actions" />}
+            >
+              <Ellipsis />
+            </Menu.Trigger>
+            <Menu.Portal>
+              <Menu.Positioner align="end" sideOffset={6} className="z-50">
+                <Menu.Popup className="min-w-52 rounded-xl border border-white/10 bg-popover/95 p-1 shadow-xl backdrop-blur outline-none">
+                  <MenuItem icon={Maximize} onClick={board.fit}>Fit to view</MenuItem>
+                  <MenuItem icon={LayoutDashboard} onClick={() => board.unpin("all")}>
+                    Tidy layout
+                  </MenuItem>
+                  <MenuItem icon={folded ? UnfoldVertical : FoldVertical} onClick={folded ? board.expandAll : board.collapseToBranches}>
+                    {folded ? "Expand all branches" : "Collapse to main branches"}
+                  </MenuItem>
+                  <Menu.Separator className="my-1 h-px bg-white/[0.08]" />
+                  <MenuItem icon={RotateCcw} onClick={board.resetDemo}>Reset demo board</MenuItem>
+                </Menu.Popup>
+              </Menu.Positioner>
+            </Menu.Portal>
+          </Menu.Root>
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1">
-        <ResearchSidebar nodes={state.nodes} activity={state.activity} onAddQuestion={addQuestion} />
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        <aside
+          aria-label="Research"
+          aria-hidden={!showSidebar}
+          inert={!showSidebar}
+          className={cn(
+            "shrink-0 overflow-hidden bg-sidebar/60 transition-[width] duration-300 ease-out",
+            showSidebar && "border-r border-white/[0.06]",
+          )}
+          style={{ width: showSidebar ? 288 : 0 }}
+        >
+          <ResearchSidebar
+            nodes={state.nodes}
+            activity={state.activity}
+            selectedId={selected?.id ?? null}
+            inputRef={inputRef}
+            onAddQuestion={addQuestion}
+            onSelect={focusNode}
+          />
+        </aside>
+
         <main className="relative min-w-0 flex-1">
-          <BoardCanvas nodes={state.nodes} edges={state.edges} isDemo={state.isDemo} dispatch={dispatch} />
+          <BoardCanvas board={board} />
         </main>
-        <NodeDetails node={selected} nodes={state.nodes} edges={state.edges} onSelect={focusNode} />
+
+        <aside
+          aria-label="Node details"
+          className={cn(
+            "shrink-0 overflow-hidden bg-sidebar/60 transition-[width] duration-300 ease-out",
+            detailsWidth > 0 && "border-l border-white/[0.06]",
+          )}
+          style={{ width: detailsWidth }}
+        >
+          {selected && !detailsOpen && (
+            <div className="flex justify-center pt-2">
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Show details"
+                title="Show details"
+                onClick={() => setDetailsOpen(true)}
+              >
+                <PanelRightOpen />
+              </Button>
+            </div>
+          )}
+          {selected && detailsOpen && (
+            <NodeDetails
+              key={selected.id}
+              node={selected}
+              nodes={state.nodes}
+              edges={state.edges}
+              branch={{
+                children: hierarchy.children.get(selected.id)?.length ?? 0,
+                collapsed: collapsed.has(selected.id),
+                hidden: collapsed.has(selected.id) ? descendants(hierarchy, selected.id).length : 0,
+              }}
+              pinned={!!state.pinned[mode][selected.id]}
+              onSelect={focusNode}
+              onCenter={() => centerOn(selected.id)}
+              onToggleBranch={() => toggleBranch(selected.id)}
+              onUnpin={() => board.unpin([selected.id])}
+              onCollapsePanel={() => setDetailsOpen(false)}
+              onClose={() => dispatch({ type: "select", nodeId: null })}
+            />
+          )}
+        </aside>
       </div>
     </div>
   );

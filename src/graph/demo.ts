@@ -1,4 +1,4 @@
-import { emptyBoard, mergeGraph, type BoardState } from "./board-state";
+import { emptyBoard, mergeGraph, withDefaults, type BoardState } from "./board-state";
 import type { EdgeRelation, GraphPatch, ResearchEdgeInput } from "./types";
 
 /**
@@ -164,5 +164,5 @@ export const demoPatch: GraphPatch = {
 };
 
 export function createDemoBoard(): BoardState {
-  return mergeGraph({ ...emptyBoard, title: DEMO_QUESTION, isDemo: true }, demoPatch);
+  return withDefaults(mergeGraph({ ...emptyBoard, title: DEMO_QUESTION, isDemo: true }, demoPatch));
 }
