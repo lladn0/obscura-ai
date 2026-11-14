@@ -7,9 +7,10 @@ import {
   FoldVertical,
   UnfoldVertical,
   Ellipsis,
-  Focus,
   LayoutDashboard,
   Maximize,
+  Maximize2,
+  Minimize2,
   Network,
   PanelLeftClose,
   PanelLeftOpen,
@@ -199,10 +200,11 @@ function WorkspaceInner() {
             variant={focusMode ? "secondary" : "ghost"}
             size="sm"
             aria-pressed={focusMode}
-            title="Focus mode: hide panels (F)"
+            title="Full canvas: hide side panels (F)"
             onClick={() => setFocusMode(!focusMode)}
           >
-            <Focus /> <span className="hidden sm:inline">Focus</span>
+            {focusMode ? <Minimize2 /> : <Maximize2 />}
+            <span className="hidden sm:inline">Full canvas</span>
           </Button>
           <Menu.Root>
             <Menu.Trigger
@@ -286,6 +288,7 @@ function WorkspaceInner() {
                 collapsed: collapsed.has(selected.id),
                 hidden: collapsed.has(selected.id) ? descendants(hierarchy, selected.id).length : 0,
               }}
+              researchDepth={hierarchy.researchDepth.get(selected.id) ?? 0}
               pinned={!!state.pinned[mode][selected.id]}
               onSelect={focusNode}
               onCenter={() => centerOn(selected.id)}

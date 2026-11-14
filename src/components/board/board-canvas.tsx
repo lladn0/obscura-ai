@@ -10,7 +10,7 @@ import {
   useReactFlow,
   useStore,
 } from "@xyflow/react";
-import { FoldVertical, UnfoldVertical, Maximize, Minus, Plus } from "lucide-react";
+import { FoldVertical, Maximize, Minus, Plus, ScanSearch, UnfoldVertical, X } from "lucide-react";
 
 import { ancestors, descendants } from "@/graph/hierarchy";
 import type { Board } from "@/graph/use-board";
@@ -54,8 +54,41 @@ function CanvasControls({ board }: { board: Board }) {
   );
 }
 
+/** Shown while a branch is focused: names it and offers an obvious way out. */
+function BranchFocusBar({
+  label,
+  size,
+  onFit,
+  onExit,
+}: {
+  label: string;
+  size: number;
+  onFit: () => void;
+  onExit: () => void;
+}) {
+  return (
+    <Panel position="top-center" className="max-w-[min(560px,calc(100%-2rem))]">
+      <div className="rh-fade-in flex min-w-0 items-center gap-1 rounded-full border border-white/10 bg-card/90 py-1 pr-1 pl-3 text-xs shadow-lg backdrop-blur">
+        <span className="shrink-0 text-muted-foreground">Branch focus</span>
+        <span className="min-w-0 truncate font-medium text-foreground" title={label}>
+          {label}
+        </span>
+        <span className="shrink-0 text-muted-foreground tabular-nums">· {size} nodes</span>
+        <Button variant="ghost" size="xs" className="ml-1 rounded-full" onClick={onFit} title="Fit the branch in view">
+          <ScanSearch /> Fit branch
+        </Button>
+        <Button variant="secondary" size="xs" className="rounded-full" onClick={onExit} title="Exit branch focus (Esc)">
+          <X /> Exit
+          <kbd className="ml-0.5 rounded border border-white/15 px-1 font-sans text-[10px] text-muted-foreground">Esc</kbd>
+        </Button>
+      </div>
+    </Panel>
+  );
+}
+
 export function BoardCanvas({ board }: { board: Board }) {
   const { state, dispatch, hierarchy, visible, collapsed, mode } = board;
+  const { fitView } = useReactFlow();
   const { nodes, edges } = state;
   const selectedId = nodes.find((n) => n.selected)?.id ?? null;
 
@@ -140,6 +173,21 @@ export function BoardCanvas({ board }: { board: Board }) {
           bgColor="transparent"
         />
         <CanvasControls board={board} />
+        {branch && selectedId && (
+          <BranchFocusBar
+            label={nodes.find((n) => n.id === selectedId)?.data.label ?? ""}
+            size={[...branch].filter((id) => visible.has(id)).length}
+            onFit={() =>
+              fitView({
+                nodes: [...branch].filter((id) => visible.has(id)).map((id) => ({ id })),
+                padding: 0.25,
+                duration: 500,
+                maxZoom: 1.2,
+              })
+            }
+            onExit={() => dispatch({ type: "select", nodeId: null })}
+          />
+        )}
         {nodes.length === 0 && (
           <Panel position="top-center" className="mt-32 text-sm text-muted-foreground">
             Ask a research question to start your board.

@@ -12,6 +12,7 @@ import {
   X,
 } from "lucide-react";
 
+import { describeDepth } from "@/graph/research-depth";
 import type { ResearchEdge, ResearchNode } from "@/graph/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -92,6 +93,7 @@ export function NodeDetails({
   nodes,
   edges,
   branch,
+  researchDepth,
   pinned,
   onSelect,
   onCenter,
@@ -104,6 +106,7 @@ export function NodeDetails({
   nodes: ResearchNode[];
   edges: ResearchEdge[];
   branch: BranchInfo;
+  researchDepth: number;
   pinned: boolean;
   onSelect: (id: string) => void;
   onCenter: () => void;
@@ -172,7 +175,8 @@ export function NodeDetails({
           )}
         </div>
 
-        <dl className="space-y-4 empty:hidden">
+        <dl className="space-y-4">
+          <Field label="Research depth">{describeDepth(researchDepth, node.type)}</Field>
           <KindFields node={node} />
         </dl>
 
