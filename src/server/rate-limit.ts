@@ -38,6 +38,11 @@ const tooMany = (message: string, retryAfterMs: number) =>
 /** Returns a 429 response when the caller is over the limit, otherwise null (and records the run). */
 export async function limitResearch(req: Request): Promise<Response | null> {
   if (!(await startsRun(req))) return null;
+  return consume(req);
+}
+
+/** Same budget for any other AI request (e.g. knowledge checks). */
+export function consume(req: Request): Response | null {
   const now = Date.now();
   const ip = clientIp(req);
   const mine = recent(hits.get(ip), now);

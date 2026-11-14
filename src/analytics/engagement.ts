@@ -15,7 +15,14 @@ export type EngagementEventType =
   | "note_created"
   | "note_attached"
   | "research_session_started"
-  | "research_session_completed";
+  | "research_session_completed"
+  // User contributions and investigations (never AI-generated changes).
+  | "question_asked"
+  | "follow_up_created"
+  | "deep_dive_completed"
+  | "connection_created"
+  | "node_edited"
+  | "quiz_completed";
 
 export type EngagementEvent = {
   t: number;
@@ -25,6 +32,9 @@ export type EngagementEvent = {
   /** Duration (node_viewed: active viewing time; session completed: active session time). */
   ms?: number;
   sessionId?: string;
+  /** quiz_completed: correct answers / questions. */
+  score?: number;
+  total?: number;
 };
 
 /** A research challenge: from opening a board to the user marking it complete. */
@@ -227,4 +237,24 @@ export function completeSession(boardId: string): ResearchSessionRecord | null {
   track("research_session_completed", boardId, { sessionId: s.id, ms: Math.round(s.activeMs) });
   flush();
   return s;
+}
+
+// --- Contributions & investigations --------------------------------------------
+
+/** A research question the user typed (the root question node of a new research run). */
+export const questionAsked = (boardId: string, nodeId: string) => track("question_asked", boardId, { nodeId });
+/** A follow-up question the user asked about a question or claim. */
+export const followUpCreated = (boardId: string, nodeId: string) => track("follow_up_created", boardId, { nodeId });
+/** A user-initiated Deep Dive that finished successfully. */
+export const deepDiveCompleted = (boardId: string, nodeId: string) => track("deep_dive_completed", boardId, { nodeId });
+/** A manual arrow drawn by the user. */
+export const connectionCreated = (boardId: string, edgeId: string) => track("connection_created", boardId, { nodeId: edgeId });
+/** The user rewrote an AI research node (counted once per node). */
+export function nodeEdited(boardId: string, nodeId: string) {
+  if (allEvents().some((e) => e.type === "node_edited" && e.boardId === boardId && e.nodeId === nodeId)) return;
+  track("node_edited", boardId, { nodeId });
+}
+export function quizCompleted(boardId: string, score: number, total: number) {
+  track("quiz_completed", boardId, { score, total });
+  flush();
 }

@@ -30,7 +30,16 @@ import { ancestors, descendants } from "@/graph/hierarchy";
 import { LAYOUT_MODES, type LayoutMode } from "@/graph/layout";
 import { useBoard } from "@/graph/use-board";
 import { findImage } from "@/integrations/wikimedia";
-import { boardClosed, boardOpened, completeSession, lastSession, nodeSelected, viewNode } from "@/analytics/engagement";
+import {
+  boardClosed,
+  boardOpened,
+  completeSession,
+  followUpCreated,
+  lastSession,
+  nodeSelected,
+  questionAsked,
+  viewNode,
+} from "@/analytics/engagement";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -195,6 +204,7 @@ function WorkspaceInner({ boardId }: { boardId: string }) {
     if (!parent || !question.trim()) return;
     const questionId = `fq-${crypto.randomUUID().slice(0, 8)}`;
     setFollowUps((m) => new Map(m).set(questionId, parentId));
+    followUpCreated(boardId, questionId);
     const label = (id: string) => state.nodes.find((n) => n.id === id)?.data.label ?? "";
     const request: ActionRequest = {
       kind: "followUp",
@@ -308,6 +318,7 @@ function WorkspaceInner({ boardId }: { boardId: string }) {
     const fresh = state.isDemo || state.nodes.length === 0;
     if (fresh) board.newBoard(question);
     const researchId = `r-${crypto.randomUUID().slice(0, 8)}`;
+    questionAsked(boardId, `${researchId}:root`);
     void agent.startResearch({ question, researchId }).then(() => {
       if (fresh) board.fit();
     });
@@ -320,6 +331,18 @@ function WorkspaceInner({ boardId }: { boardId: string }) {
     autoStarted.add(boardId);
     window.history.replaceState(null, "", window.location.pathname);
     startResearch(q);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [boardId]);
+
+  // Opened from Research Insights ("Explore"): focus the suggested node once the board is laid out.
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("focus");
+    if (!id) return;
+    window.history.replaceState(null, "", window.location.pathname);
+    const t = setTimeout(() => {
+      if (state.nodes.some((n) => n.id === id)) focusNode(id);
+    }, 600);
+    return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boardId]);
 

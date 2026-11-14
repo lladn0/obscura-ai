@@ -7,6 +7,7 @@ import { useAgent } from "@copilotkit/react-core/v2";
 
 import { boardReducer, type BoardAction, type StreamOp } from "@/graph/board-state";
 import { loadBoardById, saveBoardById, updateBoardMeta } from "@/graph/board-store";
+import { deepDiveCompleted } from "@/analytics/engagement";
 import {
   ACTION_RESULT_EVENT,
   GraphEvent,
@@ -313,7 +314,10 @@ export function useResearchAgent(boardId: string, dispatch: Dispatch<BoardAction
         flush();
         runners.delete(runId);
         if (sessions.get(runId)?.status === "cancelled") failure = null;
-        else setSession(runId, { status: failure ? "failed" : "done" });
+        else {
+          setSession(runId, { status: failure ? "failed" : "done" });
+          if (!failure && action.kind === "deepDive") deepDiveCompleted(sessions.get(runId)?.boardId ?? boardId, nodeId);
+        }
         activeRef.current.delete(nodeId);
         setActive((m) => {
           const next = new Map(m);

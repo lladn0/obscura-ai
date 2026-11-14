@@ -27,7 +27,7 @@ All keys are read server-side only (never `NEXT_PUBLIC_`), so they are not shipp
 | `RESEARCH_RATE_LIMIT_PER_HOUR` | no | Research runs per client IP per hour (default 20) |
 | `RESEARCH_GLOBAL_LIMIT_PER_HOUR` | no | Research runs per server instance per hour (default 300) |
 | `RESEARCH_TIME_LIMIT_MS` | no | Server-side stop for one run (default 285000, under the 300s function limit) |
-| `RESEARCH_MODEL_PLANNER`, `RESEARCH_MODEL_BRANCH`, `RESEARCH_MODEL_SYNTHESIS`, `RESEARCH_MODEL_DEEP_DIVE`, `RESEARCH_MODEL_CHALLENGE`, `RESEARCH_MODEL_EVIDENCE`, `RESEARCH_MODEL_GAPS` | no | Override the model per research role |
+| `RESEARCH_MODEL_PLANNER`, `RESEARCH_MODEL_BRANCH`, `RESEARCH_MODEL_SYNTHESIS`, `RESEARCH_MODEL_DEEP_DIVE`, `RESEARCH_MODEL_CHALLENGE`, `RESEARCH_MODEL_EVIDENCE`, `RESEARCH_MODEL_GAPS`, `RESEARCH_MODEL_QUIZ` | no | Override the model per research role (quiz: knowledge checks) |
 | `NEXT_PUBLIC_SHOW_COSTS` | no | `1` shows token cost in production |
 | `COPILOTKIT_TELEMETRY_DISABLED` | no | `true` turns off CopilotKit runtime telemetry |
 

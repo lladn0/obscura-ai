@@ -9,7 +9,7 @@ import { createDemoBoard } from "./demo";
 import { buildHierarchy, defaultCollapsed, descendants, visibleIds, type Hierarchy } from "./hierarchy";
 import { computeLayout, LAYOUT_MODES, sizeOf, type LayoutMode } from "./layout";
 import type { ResearchNode } from "./types";
-import { noteAttached, noteCreated } from "@/analytics/engagement";
+import { connectionCreated, nodeEdited, noteAttached, noteCreated } from "@/analytics/engagement";
 import { isMobileViewport, prefersReducedMotion } from "@/lib/use-media";
 
 const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
@@ -305,7 +305,12 @@ export function useBoard(boardId: string) {
     }
     // Personal note-taking statistics (user actions only).
     if (action.type === "addNote") noteCreated(boardId, action.nodeId);
+    if (action.type === "editNode" && ("label" in action.edit || "description" in action.edit)) {
+      const n = stateRef.current.nodes.find((x) => x.id === action.nodeId);
+      if (n && n.type !== "note") nodeEdited(boardId, n.id);
+    }
     if (action.type === "connect") {
+      connectionCreated(boardId, action.edgeId);
       const kind = (id: string) => stateRef.current.nodes.find((n) => n.id === id)?.type;
       const [a, b] = [kind(action.source), kind(action.target)];
       if (a === "note" && b && b !== "note") noteAttached(boardId, action.source);
