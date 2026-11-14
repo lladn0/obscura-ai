@@ -376,11 +376,12 @@ export function boardReducer(state: BoardState, action: BoardAction): BoardState
 
 // --- Persistence -----------------------------------------------------------
 
-const STORAGE_KEY = "rabbithole:board:v1";
+/** Storage key of the single board saved before multi-board support (migrated by board-store.ts). */
+export const LEGACY_BOARD_KEY = "rabbithole:board:v1";
 
-export function loadBoard(): BoardState | null {
+export function loadBoard(key: string): BoardState | null {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(key);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<BoardState>;
     if (!Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) return null;
@@ -402,12 +403,12 @@ export function withDefaults(state: BoardState, saved: Partial<BoardState> = {})
   };
 }
 
-export function saveBoard(state: BoardState) {
+export function saveBoard(key: string, state: BoardState) {
   try {
     // Transient interaction flags are not persisted (JSON drops undefined).
     const nodes = state.nodes.map((n) => ({ ...n, selected: undefined, dragging: undefined }));
     const edges = state.edges.map((e) => ({ ...e, selected: undefined }));
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, nodes, edges }));
+    localStorage.setItem(key, JSON.stringify({ ...state, nodes, edges }));
   } catch {
     // Storage unavailable (private mode, quota): the board still works in memory.
   }

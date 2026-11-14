@@ -296,7 +296,10 @@ export function BoardCanvas({
   busy,
   connectMode,
   onToggleConnect,
+  onUserSelect,
 }: {
+  /** Deliberate node selection by the user (for engagement statistics). */
+  onUserSelect?: (nodeId: string) => void;
   board: Board;
   busy: ReadonlySet<string>;
   connectMode: boolean;
@@ -411,6 +414,7 @@ export function BoardCanvas({
         onNodeDragStop={(_, __, dragged) => board.pinDragged(dragged.map((n) => n.id))}
         onPaneClick={() => dispatch({ type: "select", nodeId: null })}
         onNodeDoubleClick={(_, node) => board.setEditing(node.id)}
+        onNodeClick={(_, node) => onUserSelect?.(node.id)}
         onPaneContextMenu={(e) => openMenu(e)}
         onNodeContextMenu={(e, node) => openMenu(e, node.id)}
         // Manual links are visual only: never research, never hierarchy.

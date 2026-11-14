@@ -3,20 +3,21 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useReactFlow, type XYPosition } from "@xyflow/react";
 
-import { boardReducer, emptyBoard, loadBoard, saveBoard, type BoardAction, type BoardState } from "./board-state";
+import { boardReducer, emptyBoard, type BoardAction, type BoardState } from "./board-state";
+import { loadBoardById, modeKey, saveBoardById } from "./board-store";
 import { createDemoBoard } from "./demo";
 import { buildHierarchy, defaultCollapsed, descendants, visibleIds, type Hierarchy } from "./hierarchy";
 import { computeLayout, LAYOUT_MODES, sizeOf, type LayoutMode } from "./layout";
 import type { ResearchNode } from "./types";
+import { noteAttached, noteCreated } from "@/analytics/engagement";
 
 const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
 
-const MODE_KEY = "rabbithole:layout-mode";
 const FIT = { padding: 0.15, duration: 500, maxZoom: 1 };
 
-function loadMode(): LayoutMode {
+function loadMode(boardId: string): LayoutMode {
   try {
-    const saved = localStorage.getItem(MODE_KEY);
+    const saved = localStorage.getItem(modeKey(boardId));
     return LAYOUT_MODES.includes(saved as LayoutMode) ? (saved as LayoutMode) : "sun";
   } catch {
     return "sun";
@@ -101,13 +102,13 @@ const UNDOABLE = new Set<BoardAction["type"]>(["addNote", "editNode", "deleteNod
  * Board state, layout and persistence. Client-only (reads localStorage while
  * initialising) and must be rendered inside a ReactFlowProvider.
  */
-export function useBoard() {
+export function useBoard(boardId: string) {
   const [state, dispatch] = useReducer(
     boardReducer,
     undefined,
-    (): BoardState => loadBoard() ?? createDemoBoard(),
+    (): BoardState => loadBoardById(boardId) ?? { ...emptyBoard, pinned: { sun: {}, tree: {} }, deleted: [] },
   );
-  const [mode, setModeState] = useState<LayoutMode>(loadMode);
+  const [mode, setModeState] = useState<LayoutMode>(() => loadMode(boardId));
   /** Bumped when the board is replaced wholesale, to force a fresh layout. */
   const [generation, setGeneration] = useState(0);
   const { fitView, screenToFlowPosition } = useReactFlow();
@@ -119,9 +120,11 @@ export function useBoard() {
   useEffect(() => {
     stateRef.current = state;
     modeRef.current = mode;
-    const timer = setTimeout(() => saveBoard(state), 250);
+    const timer = setTimeout(() => saveBoardById(boardId, state), 250);
     return () => clearTimeout(timer);
-  }, [state, mode]);
+  }, [state, mode, boardId]);
+  // Leaving the board (navigation) must not drop the last unsaved change.
+  useEffect(() => () => saveBoardById(boardId, stateRef.current), [boardId]);
 
   // The tree only depends on which nodes/edges exist, not on positions, so it
   // is rebuilt on structural changes rather than every animation frame.
@@ -249,11 +252,11 @@ export function useBoard() {
   const setMode = useCallback((next: LayoutMode) => {
     setModeState(next);
     try {
-      localStorage.setItem(MODE_KEY, next);
+      localStorage.setItem(modeKey(boardId), next);
     } catch {
       // Preference only; ignore unavailable storage.
     }
-  }, []);
+  }, [boardId]);
 
   const pinDragged = useCallback(
     (dragged: string[]) => {
@@ -292,8 +295,16 @@ export function useBoard() {
     if (UNDOABLE.has(action.type)) {
       history.current = [...history.current.slice(-(MAX_UNDO - 1)), stateRef.current];
     }
+    // Personal note-taking statistics (user actions only).
+    if (action.type === "addNote") noteCreated(boardId, action.nodeId);
+    if (action.type === "connect") {
+      const kind = (id: string) => stateRef.current.nodes.find((n) => n.id === id)?.type;
+      const [a, b] = [kind(action.source), kind(action.target)];
+      if (a === "note" && b && b !== "note") noteAttached(boardId, action.source);
+      else if (b === "note" && a && a !== "note") noteAttached(boardId, action.target);
+    }
     dispatch(action);
-  }, []);
+  }, [boardId]);
 
   /**
    * Restore the board before the last edit. Research that streamed in since

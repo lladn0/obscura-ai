@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ReactFlowProvider, useReactFlow } from "@xyflow/react";
-import { CopilotKitProvider } from "@copilotkit/react-core/v2";
+import Link from "next/link";
 import { Menu } from "@base-ui/react/menu";
 import {
   FoldVertical,
@@ -16,7 +16,8 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   PanelRightOpen,
-  Rabbit,
+  ArrowLeft,
+  CircleCheck,
   RotateCcw,
   Square,
   Sun,
@@ -28,6 +29,7 @@ import { ancestors, descendants } from "@/graph/hierarchy";
 import { LAYOUT_MODES, type LayoutMode } from "@/graph/layout";
 import { useBoard } from "@/graph/use-board";
 import { findImage } from "@/integrations/wikimedia";
+import { boardClosed, boardOpened, completeSession, lastSession, nodeSelected, viewNode } from "@/analytics/engagement";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -90,11 +92,34 @@ const isTyping = (target: EventTarget | null) =>
   target instanceof HTMLElement &&
   (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
 
-function WorkspaceInner() {
-  const board = useBoard();
+/** Boards whose ?q= research was already started (guards React's double effects). */
+const autoStarted = new Set<string>();
+
+const formatDuration = (ms: number) => {
+  const m = Math.round(ms / 60000);
+  return m < 1 ? "<1 min" : m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;
+};
+
+function WorkspaceInner({ boardId }: { boardId: string }) {
+  const board = useBoard(boardId);
   const { state, dispatch, mode, setMode, hierarchy, visible, collapsed } = board;
   const { setCenter, getNode, getZoom } = useReactFlow();
-  const agent = useResearchAgent(dispatch);
+  const agent = useResearchAgent(boardId, dispatch);
+
+  // Engagement tracking: a research session starts when the board is opened.
+  const [session, setSessionInfo] = useState(() => lastSession(boardId));
+  useEffect(() => {
+    boardOpened(boardId);
+    // Opening may start a new session; show it (external store read once per open).
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSessionInfo(lastSession(boardId));
+    return () => boardClosed(boardId);
+  }, [boardId]);
+  const markComplete = () => {
+    completeSession(boardId);
+    setSessionInfo(lastSession(boardId));
+    dispatch({ type: "log", message: "Research marked complete" });
+  };
   const busy = useMemo(() => new Set(agent.active.keys()), [agent.active]);
   const [connectMode, setConnectMode] = useState(false);
 
@@ -203,6 +228,9 @@ function WorkspaceInner() {
     void agent.runAction(node.data.researchId ?? "board", request);
   };
   const selected = state.nodes.find((n) => n.selected) ?? null;
+  // Active viewing time of the node whose details are open (paused when the tab is inactive).
+  const selectedId = selected?.id ?? null;
+  useEffect(() => viewNode(boardId, selectedId), [boardId, selectedId]);
 
   const [sidebarOpen, setSidebarOpen] = usePersistentState("rabbithole:sidebar-open", true);
   const [detailsOpen, setDetailsOpen] = usePersistentState("rabbithole:details-open", true);
@@ -226,13 +254,14 @@ function WorkspaceInner() {
   /** Select a node, unfolding its branch if needed, and bring it into view. */
   const focusNode = useCallback(
     (id: string) => {
+      nodeSelected(boardId, id);
       dispatch({ type: "select", nodeId: id });
       if (visible.has(id)) return centerOn(id);
       const unfold = new Set(ancestors(hierarchy, id));
       dispatch({ type: "setCollapsed", nodeIds: state.collapsed.filter((c) => !unfold.has(c)) });
       setTimeout(() => centerOn(id), 650);
     },
-    [dispatch, visible, hierarchy, state.collapsed, centerOn],
+    [dispatch, visible, hierarchy, state.collapsed, centerOn, boardId],
   );
 
   /**
@@ -248,6 +277,16 @@ function WorkspaceInner() {
       if (fresh) board.fit();
     });
   };
+
+  // Opened from the home page with a question: start researching right away.
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search).get("q")?.trim();
+    if (!q || autoStarted.has(boardId)) return;
+    autoStarted.add(boardId);
+    window.history.replaceState(null, "", window.location.pathname);
+    startResearch(q);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [boardId]);
 
   const openResearchInput = useCallback(() => {
     setFocusMode(false);
@@ -319,9 +358,14 @@ function WorkspaceInner() {
           >
             {showSidebar ? <PanelLeftClose /> : <PanelLeftOpen />}
           </Button>
-          <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-violet-500 to-fuchsia-500">
-            <Rabbit className="size-3.5 text-white" />
-          </span>
+          <Link
+            href="/boards"
+            title="Back to Boards"
+            className="flex h-7 shrink-0 items-center gap-1 rounded-md px-1.5 text-xs text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground"
+          >
+            <ArrowLeft className="size-3.5" />
+            <span className="hidden sm:inline">Boards</span>
+          </Link>
           <span className="truncate text-sm font-medium" title={state.title}>
             {state.title}
           </span>
@@ -354,6 +398,24 @@ function WorkspaceInner() {
         </div>
 
         <div className="flex items-center justify-end gap-1">
+          {session?.completedAt ? (
+            <span
+              className="hidden items-center gap-1 rounded-md px-2 text-xs text-emerald-300/90 md:flex"
+              title="You marked this research complete. Reopening the board later starts a new session."
+            >
+              <CircleCheck className="size-3.5" /> Completed · {formatDuration(session.activeMs)}
+            </span>
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              title="Finish this research session (records your active time; separate from the AI finishing)"
+              onClick={markComplete}
+            >
+              <CircleCheck />
+              <span className="hidden md:inline">Mark Research Complete</span>
+            </Button>
+          )}
           <Button
             variant={focusMode ? "secondary" : "ghost"}
             size="sm"
@@ -415,6 +477,7 @@ function WorkspaceInner() {
 
         <main className="relative min-w-0 flex-1">
           <BoardCanvas
+            onUserSelect={(id) => nodeSelected(boardId, id)}
             board={board}
             busy={busy}
             connectMode={connectMode}
@@ -484,12 +547,10 @@ function WorkspaceInner() {
   );
 }
 
-export default function Workspace() {
+export default function Workspace({ boardId }: { boardId: string }) {
   return (
-    <CopilotKitProvider runtimeUrl="/api/copilotkit">
-      <ReactFlowProvider>
-        <WorkspaceInner />
-      </ReactFlowProvider>
-    </CopilotKitProvider>
+    <ReactFlowProvider>
+      <WorkspaceInner key={boardId} boardId={boardId} />
+    </ReactFlowProvider>
   );
 }
